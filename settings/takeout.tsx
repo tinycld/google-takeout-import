@@ -1,9 +1,5 @@
-import { View, Text } from 'react-native'
+import { GoogleTakeoutImportSection } from '../components/GoogleTakeoutImportSection'
 
 export default function TakeoutSettingsPanel() {
-    return (
-        <View>
-            <Text>Google Takeout Import</Text>
-        </View>
-    )
+    return <GoogleTakeoutImportSection />
 }
