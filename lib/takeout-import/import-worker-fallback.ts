@@ -8,7 +8,7 @@ import type { ImportService, ParsedRecord, TakeoutDetection } from './types'
 const BATCH_SIZE = 50
 
 function yieldToUI(): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, 0))
+    return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 async function extractAllZips(files: File[]): Promise<Map<string, Uint8Array>> {
@@ -52,9 +52,7 @@ function detectServices(entries: Map<string, Uint8Array>): TakeoutDetection {
     }
 
     const contactCount = hasContacts ? parseContacts(entries).length : 0
-    const eventCount = hasCalendar
-        ? parseCalendars(entries).reduce((sum, c) => sum + c.events.length, 0)
-        : 0
+    const eventCount = hasCalendar ? parseCalendars(entries).reduce((sum, c) => sum + c.events.length, 0) : 0
     const driveFileCount = hasDrive ? parseDriveEntries(entries).files.length : 0
     const mailThreadCount = hasMail ? countMboxMessages(entries) : 0
 
@@ -75,20 +73,12 @@ function detectServices(entries: Map<string, Uint8Array>): TakeoutDetection {
 export interface FallbackCallbacks {
     onDetection: (detection: TakeoutDetection) => void
     onBatch: (service: ImportService, records: ParsedRecord[]) => Promise<void>
-    onProgress: (
-        service: ImportService,
-        phase: 'scanning' | 'importing' | 'done',
-        total: number
-    ) => void
+    onProgress: (service: ImportService, phase: 'scanning' | 'importing' | 'done', total: number) => void
     onDone: () => void
     onError: (message: string) => void
 }
 
-export async function runFallbackImport(
-    files: File[],
-    services: ImportService[],
-    callbacks: FallbackCallbacks
-) {
+export async function runFallbackImport(files: File[], services: ImportService[], callbacks: FallbackCallbacks) {
     try {
         const entries = await extractAllZips(files)
         const detection = detectServices(entries)
@@ -140,11 +130,7 @@ export async function runFallbackImport(
     }
 }
 
-async function processBatches(
-    service: ImportService,
-    records: ParsedRecord[],
-    callbacks: FallbackCallbacks
-) {
+async function processBatches(service: ImportService, records: ParsedRecord[], callbacks: FallbackCallbacks) {
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
         const batch = records.slice(i, i + BATCH_SIZE)
         await callbacks.onBatch(service, batch)

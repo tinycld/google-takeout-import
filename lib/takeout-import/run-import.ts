@@ -6,11 +6,7 @@ export function detect(_files: File[], _context: ImportContext): Promise<Takeout
     throw new Error('run-import base module should never run')
 }
 
-export function runImport(
-    _files: File[],
-    _services: ImportService[],
-    _context: ImportContext
-): Promise<void> {
+export function runImport(_files: File[], _services: ImportService[], _context: ImportContext): Promise<void> {
     throw new Error('run-import base module should never run')
 }
 

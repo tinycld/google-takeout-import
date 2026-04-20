@@ -24,9 +24,7 @@ export function useTakeoutImport(context: ImportContext) {
                     store.setDetection(detection)
                     store.setPhase('idle')
                 } catch (err) {
-                    store.setOverallError(
-                        err instanceof Error ? err.message : 'Failed to read zip files'
-                    )
+                    store.setOverallError(err instanceof Error ? err.message : 'Failed to read zip files')
                     store.setPhase('error')
                     captureException('takeout-detect', err)
                 }
@@ -54,10 +52,10 @@ export function useTakeoutImport(context: ImportContext) {
             DocumentPicker.getDocumentAsync({
                 multiple: true,
                 type: ['application/zip'],
-            }).then(result => {
+            }).then((result) => {
                 if (result.canceled) return
                 const files = result.assets.map(
-                    asset =>
+                    (asset) =>
                         ({
                             uri: asset.uri,
                             name: asset.name,
@@ -84,7 +82,7 @@ export function useTakeoutImport(context: ImportContext) {
                 store.setPhase('complete')
             }
         },
-        onError: err => {
+        onError: (err) => {
             store.setOverallError(err instanceof Error ? err.message : 'Import failed')
             store.setPhase('error')
             captureException('takeout-import', err)
