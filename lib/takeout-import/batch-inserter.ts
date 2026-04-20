@@ -17,7 +17,7 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
     try {
         return await fn()
     } catch {
-        await new Promise(r => setTimeout(r, 1000))
+        await new Promise((r) => setTimeout(r, 1000))
         return fn()
     }
 }
@@ -30,13 +30,7 @@ export interface BatchInserterOptions {
     onException?: (context: string, err: unknown) => void
 }
 
-export function createBatchInserter({
-    pb,
-    context,
-    onProgress,
-    cancelSignal,
-    onException,
-}: BatchInserterOptions) {
+export function createBatchInserter({ pb, context, onProgress, cancelSignal, onException }: BatchInserterOptions) {
     const isCancelled = () => cancelSignal?.() === true
     const { orgId, userOrgId, mailboxId } = context
 
@@ -141,9 +135,7 @@ export function createBatchInserter({
         try {
             const existing = await pb
                 .collection('calendar_calendars')
-                .getFirstListItem(
-                    pb.filter('name = {:name} && org = {:org}', { name: calName, org: orgId })
-                )
+                .getFirstListItem(pb.filter('name = {:name} && org = {:org}', { name: calName, org: orgId }))
             calendarIdMap.set(cal.name, existing.id)
             onProgress('calendar', { skipped: 1, imported: -1 })
             return
@@ -171,7 +163,7 @@ export function createBatchInserter({
                 })
                 break
             } catch {
-                await new Promise(r => setTimeout(r, 300))
+                await new Promise((r) => setTimeout(r, 300))
             }
         }
     }
@@ -236,14 +228,13 @@ export function createBatchInserter({
 
         // Check for existing folder — reuse its ID for child resolution
         try {
-            const existing = await pb
-                .collection('drive_items')
-                .getFirstListItem(
-                    pb.filter(
-                        'name = {:name} && org = {:org} && parent = {:parent} && is_folder = true',
-                        { name: folder.name, org: orgId, parent: parentId }
-                    )
-                )
+            const existing = await pb.collection('drive_items').getFirstListItem(
+                pb.filter('name = {:name} && org = {:org} && parent = {:parent} && is_folder = true', {
+                    name: folder.name,
+                    org: orgId,
+                    parent: parentId,
+                })
+            )
             folderIdMap.set(folder.path, existing.id)
             onProgress('drive_folder', { skipped: 1, imported: -1 })
             return
@@ -353,9 +344,7 @@ export function createBatchInserter({
             try {
                 await pb
                     .collection('mail_messages')
-                    .getFirstListItem(
-                        pb.filter('message_id = {:mid}', { mid: firstMsg.message_id })
-                    )
+                    .getFirstListItem(pb.filter('message_id = {:mid}', { mid: firstMsg.message_id }))
                 onProgress('mail_thread', { skipped: 1, imported: -1 })
                 return
             } catch {
@@ -365,10 +354,7 @@ export function createBatchInserter({
 
         const latestDate =
             thread.messages.length > 0
-                ? thread.messages.reduce(
-                      (latest, m) => (m.date > latest ? m.date : latest),
-                      thread.messages[0].date
-                  )
+                ? thread.messages.reduce((latest, m) => (m.date > latest ? m.date : latest), thread.messages[0].date)
                 : new Date().toISOString()
 
         const participants = extractParticipants(thread.messages)
@@ -413,11 +399,7 @@ export function createBatchInserter({
         }
     }
 
-    async function insertMailMessage(
-        threadId: string,
-        msg: ParsedMailMessage,
-        inReplyToOverride: string
-    ) {
+    async function insertMailMessage(threadId: string, msg: ParsedMailMessage, inReplyToOverride: string) {
         const formData = new FormData()
         formData.append('thread', threadId)
         formData.append('sender_name', msg.sender_name)
@@ -457,11 +439,7 @@ function extractParticipants(messages: ParsedMailMessage[]): { name: string; ema
     const participants: { name: string; email: string }[] = []
 
     for (const msg of messages) {
-        const all = [
-            { name: msg.sender_name, email: msg.sender_email },
-            ...msg.recipients_to,
-            ...msg.recipients_cc,
-        ]
+        const all = [{ name: msg.sender_name, email: msg.sender_email }, ...msg.recipients_to, ...msg.recipients_cc]
         for (const p of all) {
             if (!p.email || seen.has(p.email)) continue
             seen.add(p.email)

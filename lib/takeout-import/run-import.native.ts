@@ -18,11 +18,7 @@ export async function detect(files: File[], _context: ImportContext): Promise<Ta
     return detectOnly(files)
 }
 
-export async function runImport(
-    files: File[],
-    services: ImportService[],
-    context: ImportContext
-): Promise<void> {
+export async function runImport(files: File[], services: ImportService[], context: ImportContext): Promise<void> {
     const inserter = createBatchInserter({
         pb,
         context,
@@ -43,7 +39,7 @@ export async function runImport(
             useTakeoutImportStore.getState().updateProgress(service, { phase, total })
         },
         onDone: () => {},
-        onError: message => {
+        onError: (message) => {
             throw new Error(message)
         },
     })

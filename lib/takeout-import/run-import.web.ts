@@ -4,12 +4,7 @@ import { useTakeoutImportStore } from '~/lib/stores/takeout-import-store'
 import { createBatchInserter } from './batch-inserter'
 import { detectOnly, runFallbackImport } from './import-worker-fallback'
 import type { ImportContext, ImportService, TakeoutDetection } from './types'
-import {
-    bridgeDetect,
-    bridgeRequestCancel,
-    bridgeRunImport,
-    terminateBridge,
-} from './worker-bridge'
+import { bridgeDetect, bridgeRequestCancel, bridgeRunImport, terminateBridge } from './worker-bridge'
 
 const SERVICE_FOR_RECORD: Record<string, ImportService> = {
     contact: 'contacts',
@@ -42,11 +37,7 @@ export async function detect(files: File[], context: ImportContext): Promise<Tak
     }
 }
 
-export async function runImport(
-    files: File[],
-    services: ImportService[],
-    context: ImportContext
-): Promise<void> {
+export async function runImport(files: File[], services: ImportService[], context: ImportContext): Promise<void> {
     if (useFallback) {
         await runOnMainThread(files, services, context)
         return
@@ -71,11 +62,7 @@ export function requestCancel() {
 
 function isWorkerConstructionError(err: unknown): boolean {
     if (!(err instanceof Error)) return false
-    return (
-        err.message.includes('Worker') ||
-        err.message.includes('worker') ||
-        err.name === 'SecurityError'
-    )
+    return err.message.includes('Worker') || err.message.includes('worker') || err.name === 'SecurityError'
 }
 
 async function runOnMainThread(files: File[], services: ImportService[], context: ImportContext) {
@@ -99,7 +86,7 @@ async function runOnMainThread(files: File[], services: ImportService[], context
             useTakeoutImportStore.getState().updateProgress(service, { phase, total })
         },
         onDone: () => {},
-        onError: message => {
+        onError: (message) => {
             throw new Error(message)
         },
     })
