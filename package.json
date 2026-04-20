@@ -6,11 +6,11 @@
     "exports": {
         "./package.json": "./package.json",
         "./manifest": "./manifest.ts",
-        "./types": "./types.ts",
-        "./hooks/*": "./hooks/*.ts",
-        "./components/*": "./components/*.tsx",
-        "./settings/*": "./settings/*.tsx",
-        "./lib/*": "./lib/*.ts"
+        "./types": "./tinycld/google-takeout-import/types.ts",
+        "./hooks/*": "./tinycld/google-takeout-import/hooks/*.ts",
+        "./components/*": "./tinycld/google-takeout-import/components/*.tsx",
+        "./settings/*": "./tinycld/google-takeout-import/settings/*.tsx",
+        "./lib/*": "./tinycld/google-takeout-import/lib/*.ts"
     },
     "scripts": {
         "lint": "biome check .",

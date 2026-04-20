@@ -1,6 +1,6 @@
-import { PB_SERVER_ADDR } from '~/lib/config'
-import { pb } from '~/lib/pocketbase'
-import { useTakeoutImportStore } from '~/lib/stores/takeout-import-store'
+import { PB_SERVER_ADDR } from '@tinycld/core/lib/config'
+import { pb } from '@tinycld/core/lib/pocketbase'
+import { useTakeoutImportStore } from '@tinycld/core/lib/stores/takeout-import-store'
 import type { ImportContext, ImportService, TakeoutDetection } from './types'
 import type { MainToWorker, WorkerToMain } from './worker-protocol'
 

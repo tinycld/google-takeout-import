@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { pb } from '~/lib/pocketbase'
-import { useCurrentRole } from '~/lib/use-current-role'
+import { pb } from '@tinycld/core/lib/pocketbase'
+import { useCurrentRole } from '@tinycld/core/lib/use-current-role'
 
 type MailMailboxMember = { user_org: string; mailbox: string }
 

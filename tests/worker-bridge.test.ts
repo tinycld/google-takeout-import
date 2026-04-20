@@ -6,7 +6,7 @@ import {
 } from '@tinycld/google-takeout-import/lib/takeout-import/worker-bridge'
 import type { WorkerToMain } from '@tinycld/google-takeout-import/lib/takeout-import/worker-protocol'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { useTakeoutImportStore } from '~/lib/stores/takeout-import-store'
+import { useTakeoutImportStore } from '@tinycld/core/lib/stores/takeout-import-store'
 
 vi.mock('~/lib/pocketbase', () => ({
     pb: {

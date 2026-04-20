@@ -1,13 +1,13 @@
 import * as DocumentPicker from 'expo-document-picker'
 import { useCallback, useRef } from 'react'
 import { Platform } from 'react-native'
-import { captureException } from '~/lib/errors'
-import { useMutation } from '~/lib/mutations'
-import { useTakeoutImportStore } from '~/lib/stores/takeout-import-store'
+import { captureException } from '@tinycld/core/lib/errors'
+import { useMutation } from '@tinycld/core/lib/mutations'
+import { useTakeoutImportStore } from '@tinycld/core/lib/stores/takeout-import-store'
 import * as runImportImpl from './run-import'
 import type { ImportContext, ImportService } from './types'
 
-export { useTakeoutImportStore } from '~/lib/stores/takeout-import-store'
+export { useTakeoutImportStore } from '@tinycld/core/lib/stores/takeout-import-store'
 
 export function useTakeoutImport(context: ImportContext) {
     const store = useTakeoutImportStore()
