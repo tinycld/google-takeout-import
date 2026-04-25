@@ -8,13 +8,13 @@ import type { WorkerToMain } from '@tinycld/google-takeout-import/lib/takeout-im
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useTakeoutImportStore } from '@tinycld/core/lib/stores/takeout-import-store'
 
-vi.mock('~/lib/pocketbase', () => ({
+vi.mock('@tinycld/core/lib/pocketbase', () => ({
     pb: {
         authStore: { token: 'test-token', record: { id: 'user1' } },
     },
 }))
 
-vi.mock('~/lib/config', () => ({
+vi.mock('@tinycld/core/lib/config', () => ({
     PB_SERVER_ADDR: 'http://localhost:7090',
 }))
 
