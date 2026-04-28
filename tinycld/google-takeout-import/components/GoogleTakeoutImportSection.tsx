@@ -34,7 +34,7 @@ export function GoogleTakeoutImportSection() {
     const { userOrgId } = useCurrentRole()
     const mailboxId = useDefaultMailbox()
     const packages = usePackages()
-    const installedSlugs = new Set(packages.map(p => p.slug))
+    const installedSlugs = new Set(packages.map((p) => p.slug))
 
     const { selectFiles, startImport, requestCancel, store } = useTakeoutImport({
         orgId,
@@ -57,25 +57,19 @@ export function GoogleTakeoutImportSection() {
     }
 
     const handleStartImport = () => {
-        const services = detectedServices.filter(s => effectiveSelectedServices[s])
+        const services = detectedServices.filter((s) => effectiveSelectedServices[s])
         if (services.length > 0) startImport(services)
     }
 
     return (
         <View className="gap-3">
-            <Text style={{ fontSize: 20, fontWeight: 'bold', color: foregroundColor }}>
-                Import from Google
-            </Text>
+            <Text style={{ fontSize: 20, fontWeight: 'bold', color: foregroundColor }}>Import from Google</Text>
             <Text style={{ fontSize: 13, color: mutedColor }}>
-                Import your data from Google Takeout. Select one or more .zip files exported from
-                Google Takeout.
+                Import your data from Google Takeout. Select one or more .zip files exported from Google Takeout.
             </Text>
 
             <SectionCard>
-                <TakeoutIdleState
-                    isVisible={phase === 'idle' && !detection}
-                    onSelectFiles={selectFiles}
-                />
+                <TakeoutIdleState isVisible={phase === 'idle' && !detection} onSelectFiles={selectFiles} />
                 <TakeoutDetectingState isVisible={phase === 'detecting'} />
                 <TakeoutDetectedState
                     isVisible={phase === 'idle' && !!detection}
@@ -101,11 +95,7 @@ export function GoogleTakeoutImportSection() {
                     progress={progress}
                     onReset={store.reset}
                 />
-                <TakeoutErrorState
-                    isVisible={phase === 'error'}
-                    error={overallError}
-                    onReset={store.reset}
-                />
+                <TakeoutErrorState isVisible={phase === 'error'} error={overallError} onReset={store.reset} />
             </SectionCard>
         </View>
     )
@@ -128,13 +118,7 @@ function SectionCard({ children }: { children: React.ReactNode }) {
     )
 }
 
-function TakeoutIdleState({
-    isVisible,
-    onSelectFiles,
-}: {
-    isVisible: boolean
-    onSelectFiles: () => void
-}) {
+function TakeoutIdleState({ isVisible, onSelectFiles }: { isVisible: boolean; onSelectFiles: () => void }) {
     const mutedColor = useThemeColor('muted-foreground')
     const primaryColor = useThemeColor('primary')
 
@@ -151,9 +135,7 @@ function TakeoutIdleState({
                 className="px-4 py-2.5 rounded-lg"
                 style={{ backgroundColor: primaryColor }}
             >
-                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>
-                    Select Takeout Files
-                </Text>
+                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>Select Takeout Files</Text>
             </Pressable>
         </View>
     )
@@ -212,12 +194,12 @@ function TakeoutDetectedState({
         mail: 'messages',
     }
 
-    const hasSelection = detectedServices.some(s => selectedServices[s])
+    const hasSelection = detectedServices.some((s) => selectedServices[s])
 
     return (
         <View className="gap-4">
             <View className="gap-1">
-                {(Object.keys(SERVICE_META) as ImportService[]).map(svc => {
+                {(Object.keys(SERVICE_META) as ImportService[]).map((svc) => {
                     const { label, Icon } = SERVICE_META[svc]
                     const detected = detectedServices.includes(svc)
                     const selected = selectedServices[svc]
@@ -264,9 +246,7 @@ function TakeoutDetectedState({
                     style={{ backgroundColor: hasSelection ? primaryColor : mutedColor }}
                     disabled={!hasSelection}
                 >
-                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>
-                        Start Import
-                    </Text>
+                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>Start Import</Text>
                 </Pressable>
                 <Pressable
                     onPress={onSelectFiles}
@@ -285,8 +265,8 @@ function MailboxWarning({ isVisible, color }: { isVisible: boolean; color: strin
 
     return (
         <Text style={{ fontSize: 13, color }}>
-            Mail was found but you don't have a mailbox set up. Configure a mailbox in Mail settings
-            first to import mail.
+            Mail was found but you don't have a mailbox set up. Configure a mailbox in Mail settings first to import
+            mail.
         </Text>
     )
 }
@@ -318,7 +298,7 @@ function TakeoutImportingState({
                     Background worker unavailable — importing in the foreground.
                 </Text>
             ) : null}
-            {activeServices.map(svc => (
+            {activeServices.map((svc) => (
                 <ServiceProgressCard key={svc} progress={progress[svc]} />
             ))}
             <TakeoutCancelButton
@@ -383,18 +363,13 @@ function ServiceProgressCard({ progress: p }: { progress: ImportProgress }) {
         <View className="gap-2 py-2">
             <View className="flex-row items-center gap-2">
                 <Icon size={16} color={foregroundColor} />
-                <Text style={{ fontSize: 14, fontWeight: '600', color: foregroundColor, flex: 1 }}>
-                    {label}
-                </Text>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: foregroundColor, flex: 1 }}>{label}</Text>
                 <Text style={{ fontSize: 12, color: mutedColor }}>
                     {isDone ? 'Done' : p.phase === 'scanning' ? 'Scanning...' : `${pct}%`}
                 </Text>
             </View>
 
-            <View
-                className="h-1.5 rounded-full overflow-hidden"
-                style={{ backgroundColor: `${primaryColor}20` }}
-            >
+            <View className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: `${primaryColor}20` }}>
                 <View
                     className="h-full rounded-full"
                     style={{
@@ -414,7 +389,7 @@ function ServiceProgressCard({ progress: p }: { progress: ImportProgress }) {
                 isVisible={p.errorMessages.length > 0}
                 messages={p.errorMessages}
                 showErrors={showErrors}
-                onToggle={() => setShowErrors(v => !v)}
+                onToggle={() => setShowErrors((v) => !v)}
             />
         </View>
     )
@@ -426,15 +401,7 @@ function SkippedCount({ isVisible, count }: { isVisible: boolean; count: number 
     return <Text style={{ fontSize: 12, color: mutedColor }}>{count} skipped</Text>
 }
 
-function ErrorCount({
-    isVisible,
-    count,
-    color,
-}: {
-    isVisible: boolean
-    count: number
-    color: string
-}) {
+function ErrorCount({ isVisible, count, color }: { isVisible: boolean; count: number; color: string }) {
     if (!isVisible) return null
     return <Text style={{ fontSize: 12, color }}>{count} errors</Text>
 }
@@ -458,26 +425,17 @@ function ErrorDetails({
     return (
         <View>
             <Pressable onPress={onToggle} className="flex-row items-center gap-1">
-                {showErrors ? (
-                    <ChevronUp size={14} color={mutedColor} />
-                ) : (
-                    <ChevronDown size={14} color={mutedColor} />
-                )}
-                <Text style={{ fontSize: 12, color: mutedColor }}>
-                    {showErrors ? 'Hide errors' : 'Show errors'}
-                </Text>
+                {showErrors ? <ChevronUp size={14} color={mutedColor} /> : <ChevronDown size={14} color={mutedColor} />}
+                <Text style={{ fontSize: 12, color: mutedColor }}>{showErrors ? 'Hide errors' : 'Show errors'}</Text>
             </Pressable>
             {showErrors && (
                 <View className="mt-1 gap-0.5">
-                    {messages.slice(0, 20).map(msg => (
+                    {messages.slice(0, 20).map((msg) => (
                         <Text key={msg} style={{ fontSize: 11, color: dangerColor }}>
                             {msg}
                         </Text>
                     ))}
-                    <RemainingErrors
-                        isVisible={messages.length > 20}
-                        count={messages.length - 20}
-                    />
+                    <RemainingErrors isVisible={messages.length > 20} count={messages.length - 20} />
                 </View>
             )}
         </View>
@@ -514,9 +472,7 @@ function TakeoutCompleteState({
     return (
         <View className="gap-3 items-center py-4">
             <Check size={32} color={primaryColor} />
-            <Text style={{ fontSize: 16, fontWeight: '600', color: foregroundColor }}>
-                Import Complete
-            </Text>
+            <Text style={{ fontSize: 16, fontWeight: '600', color: foregroundColor }}>Import Complete</Text>
             <Text style={{ fontSize: 13, color: mutedColor, textAlign: 'center' }}>
                 {totalImported} records imported
                 {totalSkipped > 0 ? `, ${totalSkipped} skipped` : ''}
@@ -551,9 +507,7 @@ function TakeoutErrorState({
     return (
         <View className="gap-3 items-center py-4">
             <AlertTriangle size={32} color={dangerColor} />
-            <Text style={{ fontSize: 16, fontWeight: '600', color: foregroundColor }}>
-                Import Failed
-            </Text>
+            <Text style={{ fontSize: 16, fontWeight: '600', color: foregroundColor }}>Import Failed</Text>
             <Text style={{ fontSize: 13, color: dangerColor, textAlign: 'center' }}>
                 {error || 'An unknown error occurred'}
             </Text>

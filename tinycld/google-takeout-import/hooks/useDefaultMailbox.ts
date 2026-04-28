@@ -16,7 +16,7 @@ export function useDefaultMailbox(): string | null {
         let cancelled = false
         pb.collection('mail_mailbox_members')
             .getList<MailMailboxMember>(1, 1, { filter: `user_org="${userOrgId}"` })
-            .then(r => {
+            .then((r) => {
                 if (!cancelled) setMembers(r.items)
             })
             .catch(() => {
