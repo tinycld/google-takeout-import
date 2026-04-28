@@ -1,9 +1,9 @@
-import * as DocumentPicker from 'expo-document-picker'
-import { useCallback, useRef } from 'react'
-import { Platform } from 'react-native'
 import { captureException } from '@tinycld/core/lib/errors'
 import { useMutation } from '@tinycld/core/lib/mutations'
 import { useTakeoutImportStore } from '@tinycld/core/lib/stores/takeout-import-store'
+import * as DocumentPicker from 'expo-document-picker'
+import { useCallback, useRef } from 'react'
+import { Platform } from 'react-native'
 import * as runImportImpl from './run-import'
 import type { ImportContext, ImportService } from './types'
 
@@ -24,7 +24,9 @@ export function useTakeoutImport(context: ImportContext) {
                     store.setDetection(detection)
                     store.setPhase('idle')
                 } catch (err) {
-                    store.setOverallError(err instanceof Error ? err.message : 'Failed to read zip files')
+                    store.setOverallError(
+                        err instanceof Error ? err.message : 'Failed to read zip files'
+                    )
                     store.setPhase('error')
                     captureException('takeout-detect', err)
                 }
@@ -52,10 +54,10 @@ export function useTakeoutImport(context: ImportContext) {
             DocumentPicker.getDocumentAsync({
                 multiple: true,
                 type: ['application/zip'],
-            }).then((result) => {
+            }).then(result => {
                 if (result.canceled) return
                 const files = result.assets.map(
-                    (asset) =>
+                    asset =>
                         ({
                             uri: asset.uri,
                             name: asset.name,
@@ -82,7 +84,7 @@ export function useTakeoutImport(context: ImportContext) {
                 store.setPhase('complete')
             }
         },
-        onError: (err) => {
+        onError: err => {
             store.setOverallError(err instanceof Error ? err.message : 'Import failed')
             store.setPhase('error')
             captureException('takeout-import', err)

@@ -82,7 +82,7 @@ export function parseDriveEntries(entries: Map<string, Uint8Array>): {
 
     // Sort folders by depth (parents first)
     const sortedFolders = [...folderPaths]
-        .filter((p) => p.length > 0)
+        .filter(p => p.length > 0)
         .sort((a, b) => a.split('/').length - b.split('/').length)
         .map(
             (path): ParsedDriveFolder => ({
@@ -95,6 +95,9 @@ export function parseDriveEntries(entries: Map<string, Uint8Array>): {
     return { folders: sortedFolders, files }
 }
 
-export function driveRecordsInOrder(folders: ParsedDriveFolder[], files: ParsedDriveFile[]): ParsedRecord[] {
+export function driveRecordsInOrder(
+    folders: ParsedDriveFolder[],
+    files: ParsedDriveFile[]
+): ParsedRecord[] {
     return [...folders, ...files]
 }

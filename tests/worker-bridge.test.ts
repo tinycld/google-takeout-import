@@ -1,3 +1,4 @@
+import { useTakeoutImportStore } from '@tinycld/core/lib/stores/takeout-import-store'
 import {
     __setBridgeWorkerFactoryForTests,
     bridgeDetect,
@@ -6,7 +7,6 @@ import {
 } from '@tinycld/google-takeout-import/lib/takeout-import/worker-bridge'
 import type { WorkerToMain } from '@tinycld/google-takeout-import/lib/takeout-import/worker-protocol'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { useTakeoutImportStore } from '@tinycld/core/lib/stores/takeout-import-store'
 
 vi.mock('@tinycld/core/lib/pocketbase', () => ({
     pb: {
@@ -66,7 +66,7 @@ describe('worker-bridge', () => {
         emit({ type: 'ready' })
 
         // After ready resolves, bridge should have posted 'detect'
-        await new Promise((r) => setTimeout(r, 10))
+        await new Promise(r => setTimeout(r, 10))
         expect(posted).toHaveLength(2)
         expect((posted[1] as Record<string, unknown>).type).toBe('detect')
 
@@ -98,7 +98,7 @@ describe('worker-bridge', () => {
 
         // Simulate ready
         emit({ type: 'ready' })
-        await new Promise((r) => setTimeout(r, 10))
+        await new Promise(r => setTimeout(r, 10))
 
         // Should have sent init + start-import
         expect(posted).toHaveLength(2)
@@ -124,7 +124,7 @@ describe('worker-bridge', () => {
         const importPromise = bridgeRunImport([], ['contacts'], context)
 
         emit({ type: 'ready' })
-        await new Promise((r) => setTimeout(r, 10))
+        await new Promise(r => setTimeout(r, 10))
 
         emit({ type: 'cancelled' })
         await importPromise
@@ -138,7 +138,7 @@ describe('worker-bridge', () => {
         const importPromise = bridgeRunImport([], ['contacts'], context)
 
         emit({ type: 'ready' })
-        await new Promise((r) => setTimeout(r, 10))
+        await new Promise(r => setTimeout(r, 10))
 
         emit({ type: 'error', message: 'something broke' })
 

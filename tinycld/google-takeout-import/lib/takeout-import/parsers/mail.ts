@@ -165,7 +165,7 @@ function parseGmailLabels(labelsStr: string): string[] {
     if (!labelsStr) return []
     return labelsStr
         .split(',')
-        .map((l) => l.trim())
+        .map(l => l.trim())
         .filter(Boolean)
 }
 
@@ -184,7 +184,7 @@ function parseAddressList(raw: string): { name: string; email: string }[] {
     const decoded = decodeHeaderValue(raw)
     // Split on commas that are not inside angle brackets
     const parts = decoded.split(/,(?![^<]*>)/)
-    return parts.map((p) => parseEmailAddress(p.trim())).filter((a) => a.email)
+    return parts.map(p => parseEmailAddress(p.trim())).filter(a => a.email)
 }
 
 function decodeHeaderValue(value: string): string {
@@ -200,7 +200,9 @@ function decodeHeaderValue(value: string): string {
         // Quoted-printable
         return text
             .replace(/_/g, ' ')
-            .replace(/=([0-9A-Fa-f]{2})/g, (_: string, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
+            .replace(/=([0-9A-Fa-f]{2})/g, (_: string, hex: string) =>
+                String.fromCharCode(Number.parseInt(hex, 16))
+            )
     })
 }
 
@@ -227,7 +229,10 @@ function extractBody(
     return { html: '', attachments: [] }
 }
 
-function parseMultipart(body: string, contentType: string): { html: string; attachments: ParsedAttachment[] } {
+function parseMultipart(
+    body: string,
+    contentType: string
+): { html: string; attachments: ParsedAttachment[] } {
     const boundaryMatch = contentType.match(/boundary="?([^";\s]+)"?/i)
     if (!boundaryMatch) return { html: '', attachments: [] }
 
@@ -263,7 +268,9 @@ function parseMultipart(body: string, contentType: string): { html: string; atta
 
         // Attachment
         if (disposition.includes('attachment')) {
-            const filenameMatch = disposition.match(/filename="?([^";\n]+)"?/i) || partCt.match(/name="?([^";\n]+)"?/i)
+            const filenameMatch =
+                disposition.match(/filename="?([^";\n]+)"?/i) ||
+                partCt.match(/name="?([^";\n]+)"?/i)
             const filename = filenameMatch?.[1]?.trim() || 'attachment'
             const mimeType = partCt.split(';')[0].trim() || 'application/octet-stream'
 
@@ -314,7 +321,9 @@ function decodeTransferEncoding(text: string, encoding: string): string {
 function decodeQuotedPrintable(text: string): string {
     return text
         .replace(/=\r?\n/g, '') // Soft line breaks
-        .replace(/=([0-9A-Fa-f]{2})/g, (_match, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
+        .replace(/=([0-9A-Fa-f]{2})/g, (_match, hex) =>
+            String.fromCharCode(Number.parseInt(hex, 16))
+        )
 }
 
 function decodeBase64ToBuffer(base64: string): ArrayBuffer {
@@ -371,7 +380,9 @@ function groupIntoThreads(messages: ParsedMboxMessage[]): ParsedMailThread[] {
 
     for (const [threadId, threadMessages] of threadMap) {
         // Sort messages by date
-        threadMessages.sort((a, b) => new Date(a.message.date).getTime() - new Date(b.message.date).getTime())
+        threadMessages.sort(
+            (a, b) => new Date(a.message.date).getTime() - new Date(b.message.date).getTime()
+        )
 
         const firstMsg = threadMessages[0]
         const allLabels = new Set<string>()
@@ -400,14 +411,16 @@ function groupIntoThreads(messages: ParsedMboxMessage[]): ParsedMailThread[] {
             'Opened',
             'Chat',
         ])
-        const customLabels = labelsArr.filter((l) => !standardLabels.has(l) && !l.startsWith('Category '))
+        const customLabels = labelsArr.filter(
+            l => !standardLabels.has(l) && !l.startsWith('Category ')
+        )
 
         threads.push({
             recordType: 'mail_thread',
             gmailThreadId: threadId,
             subject: firstMsg.message.subject || '(No Subject)',
             snippet: firstMsg.message.snippet,
-            messages: threadMessages.map((m) => m.message),
+            messages: threadMessages.map(m => m.message),
             folder,
             is_read: isRead,
             is_starred: isStarred,
@@ -418,9 +431,20 @@ function groupIntoThreads(messages: ParsedMboxMessage[]): ParsedMailThread[] {
     return threads
 }
 
-function resolveFolder(labels: string[]): 'inbox' | 'sent' | 'drafts' | 'trash' | 'spam' | 'archive' {
+function resolveFolder(
+    labels: string[]
+): 'inbox' | 'sent' | 'drafts' | 'trash' | 'spam' | 'archive' {
     // Check explicit folder labels (priority: trash > spam > drafts > sent > inbox)
-    for (const priority of ['Trash', 'Spam', 'Junk', 'Draft', 'Drafts', 'Sent', 'Sent Messages', 'Inbox']) {
+    for (const priority of [
+        'Trash',
+        'Spam',
+        'Junk',
+        'Draft',
+        'Drafts',
+        'Sent',
+        'Sent Messages',
+        'Inbox',
+    ]) {
         if (labels.includes(priority)) {
             return LABEL_FOLDER_MAP[priority] as 'inbox' | 'sent' | 'drafts' | 'trash' | 'spam'
         }
