@@ -5,7 +5,7 @@
         "rootDir": "..",
         "paths": {
             "~/tinycld/google-takeout-import/*": ["./tinycld/google-takeout-import/*"],
-            "@tinycld/core/*": ["../core/tinycld/core/*"],
+            "@tinycld/core/*": ["../core/*"],
             "@tinycld/*": ["../core/packages/@tinycld/*"],
             "~/*": ["../core/*"]
         },
