@@ -28,8 +28,6 @@ const SERVICE_META: Record<ImportService, { label: string; Icon: typeof Users }>
 }
 
 export function GoogleTakeoutImportSection() {
-    const foregroundColor = useThemeColor('foreground')
-    const mutedColor = useThemeColor('muted-foreground')
     const { orgId } = useOrgInfo()
     const { userOrgId } = useCurrentRole()
     const mailboxId = useDefaultMailbox()
@@ -63,8 +61,10 @@ export function GoogleTakeoutImportSection() {
 
     return (
         <View className="gap-3">
-            <Text style={{ fontSize: 20, fontWeight: 'bold', color: foregroundColor }}>Import from Google</Text>
-            <Text style={{ fontSize: 13, color: mutedColor }}>
+            <Text className="text-foreground" style={{ fontSize: 20, fontWeight: 'bold' }}>
+                Import from Google
+            </Text>
+            <Text className="text-muted-foreground" style={{ fontSize: 13 }}>
                 Import your data from Google Takeout. Select one or more .zip files exported from Google Takeout.
             </Text>
 
@@ -102,54 +102,38 @@ export function GoogleTakeoutImportSection() {
 }
 
 function SectionCard({ children }: { children: React.ReactNode }) {
-    const surfaceBg = useThemeColor('surface-secondary')
-    const borderColor = useThemeColor('border')
-
-    return (
-        <View
-            className="rounded-xl border p-4"
-            style={{
-                backgroundColor: surfaceBg,
-                borderColor: borderColor,
-            }}
-        >
-            {children}
-        </View>
-    )
+    return <View className="rounded-xl border border-border bg-surface-secondary p-4">{children}</View>
 }
 
 function TakeoutIdleState({ isVisible, onSelectFiles }: { isVisible: boolean; onSelectFiles: () => void }) {
     const mutedColor = useThemeColor('muted-foreground')
-    const primaryColor = useThemeColor('primary')
 
     if (!isVisible) return null
 
     return (
         <View className="gap-3 items-center py-4">
             <Upload size={32} color={mutedColor} />
-            <Text style={{ fontSize: 14, color: mutedColor, textAlign: 'center' }}>
+            <Text className="text-muted-foreground" style={{ fontSize: 14, textAlign: 'center' }}>
                 Select your Google Takeout .zip files to get started.
             </Text>
-            <Pressable
-                onPress={onSelectFiles}
-                className="px-4 py-2.5 rounded-lg"
-                style={{ backgroundColor: primaryColor }}
-            >
-                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>Select Takeout Files</Text>
+            <Pressable onPress={onSelectFiles} className="px-4 py-2.5 rounded-lg bg-primary">
+                <Text className="text-white" style={{ fontWeight: '600', fontSize: 14 }}>
+                    Select Takeout Files
+                </Text>
             </Pressable>
         </View>
     )
 }
 
 function TakeoutDetectingState({ isVisible }: { isVisible: boolean }) {
-    const mutedColor = useThemeColor('muted-foreground')
-
     if (!isVisible) return null
 
     return (
         <View className="gap-3 items-center py-4">
             <ActivityIndicator size="small" />
-            <Text style={{ fontSize: 14, color: mutedColor }}>Scanning zip files...</Text>
+            <Text className="text-muted-foreground" style={{ fontSize: 14 }}>
+                Scanning zip files...
+            </Text>
         </View>
     )
 }
@@ -175,8 +159,6 @@ function TakeoutDetectedState({
 }) {
     const foregroundColor = useThemeColor('foreground')
     const mutedColor = useThemeColor('muted-foreground')
-    const primaryColor = useThemeColor('primary')
-    const warningColor = useThemeColor('danger')
 
     if (!isVisible || !detection) return null
 
@@ -218,15 +200,12 @@ function TakeoutDetectedState({
                             />
                             <Icon size={18} color={detected ? foregroundColor : mutedColor} />
                             <Text
-                                style={{
-                                    fontSize: 14,
-                                    color: detected ? foregroundColor : mutedColor,
-                                    flex: 1,
-                                }}
+                                className={detected ? 'text-foreground' : 'text-muted-foreground'}
+                                style={{ fontSize: 14, flex: 1 }}
                             >
                                 {label}
                                 {detected && count > 0 && (
-                                    <Text style={{ color: mutedColor }}>
+                                    <Text className="text-muted-foreground">
                                         {' '}
                                         — {count.toLocaleString()} {countLabels[svc]}
                                     </Text>
@@ -237,34 +216,36 @@ function TakeoutDetectedState({
                 })}
             </View>
 
-            <MailboxWarning isVisible={mailDetectedNoMailbox} color={warningColor} />
+            <MailboxWarning isVisible={mailDetectedNoMailbox} />
 
             <View className="flex-row gap-3">
                 <Pressable
                     onPress={onStartImport}
-                    className="px-4 py-2.5 rounded-lg"
-                    style={{ backgroundColor: hasSelection ? primaryColor : mutedColor }}
+                    className={`px-4 py-2.5 rounded-lg ${hasSelection ? 'bg-primary' : 'bg-muted-foreground'}`}
                     disabled={!hasSelection}
                 >
-                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>Start Import</Text>
+                    <Text className="text-white" style={{ fontWeight: '600', fontSize: 14 }}>
+                        Start Import
+                    </Text>
                 </Pressable>
                 <Pressable
                     onPress={onSelectFiles}
-                    className="px-4 py-2.5 rounded-lg border"
-                    style={{ borderColor: mutedColor }}
+                    className="px-4 py-2.5 rounded-lg border border-muted-foreground"
                 >
-                    <Text style={{ color: foregroundColor, fontSize: 14 }}>Change Files</Text>
+                    <Text className="text-foreground" style={{ fontSize: 14 }}>
+                        Change Files
+                    </Text>
                 </Pressable>
             </View>
         </View>
     )
 }
 
-function MailboxWarning({ isVisible, color }: { isVisible: boolean; color: string }) {
+function MailboxWarning({ isVisible }: { isVisible: boolean }) {
     if (!isVisible) return null
 
     return (
-        <Text style={{ fontSize: 13, color }}>
+        <Text className="text-danger" style={{ fontSize: 13 }}>
             Mail was found but you don't have a mailbox set up. Configure a mailbox in Mail settings first to import
             mail.
         </Text>
@@ -286,9 +267,6 @@ function TakeoutImportingState({
     cancelRequested: boolean
     fallbackActive: boolean
 }) {
-    const mutedColor = useThemeColor('muted-foreground')
-    const dangerColor = useThemeColor('danger')
-
     if (!isVisible) return null
 
     return (
@@ -301,12 +279,7 @@ function TakeoutImportingState({
             {activeServices.map((svc) => (
                 <ServiceProgressCard key={svc} progress={progress[svc]} />
             ))}
-            <TakeoutCancelButton
-                onCancel={onCancel}
-                cancelRequested={cancelRequested}
-                mutedColor={mutedColor}
-                dangerColor={dangerColor}
-            />
+            <TakeoutCancelButton onCancel={onCancel} cancelRequested={cancelRequested} />
         </View>
     )
 }
@@ -314,32 +287,20 @@ function TakeoutImportingState({
 function TakeoutCancelButton({
     onCancel,
     cancelRequested,
-    mutedColor,
-    dangerColor,
 }: {
     onCancel: () => void
     cancelRequested: boolean
-    mutedColor: string
-    dangerColor: string
 }) {
+    const borderClass = cancelRequested ? 'border-muted-foreground' : 'border-danger'
+    const textClass = cancelRequested ? 'text-muted-foreground' : 'text-danger'
     return (
         <Pressable
             onPress={onCancel}
             disabled={cancelRequested}
-            className="self-center px-4 py-2 rounded-lg mt-1"
-            style={{
-                borderWidth: 1,
-                borderColor: cancelRequested ? mutedColor : dangerColor,
-                opacity: cancelRequested ? 0.5 : 1,
-            }}
+            className={`self-center px-4 py-2 rounded-lg mt-1 border ${borderClass}`}
+            style={{ opacity: cancelRequested ? 0.5 : 1 }}
         >
-            <Text
-                style={{
-                    fontSize: 13,
-                    fontWeight: '600',
-                    color: cancelRequested ? mutedColor : dangerColor,
-                }}
-            >
+            <Text className={textClass} style={{ fontSize: 13, fontWeight: '600' }}>
                 {cancelRequested ? 'Canceling...' : 'Cancel Import'}
             </Text>
         </Pressable>
@@ -348,9 +309,6 @@ function TakeoutCancelButton({
 
 function ServiceProgressCard({ progress: p }: { progress: ImportProgress }) {
     const foregroundColor = useThemeColor('foreground')
-    const mutedColor = useThemeColor('muted-foreground')
-    const primaryColor = useThemeColor('primary')
-    const dangerColor = useThemeColor('danger')
     const [showErrors, setShowErrors] = useState(false)
 
     const { label, Icon } = SERVICE_META[p.service]
@@ -363,26 +321,24 @@ function ServiceProgressCard({ progress: p }: { progress: ImportProgress }) {
         <View className="gap-2 py-2">
             <View className="flex-row items-center gap-2">
                 <Icon size={16} color={foregroundColor} />
-                <Text style={{ fontSize: 14, fontWeight: '600', color: foregroundColor, flex: 1 }}>{label}</Text>
-                <Text style={{ fontSize: 12, color: mutedColor }}>
+                <Text className="text-foreground" style={{ fontSize: 14, fontWeight: '600', flex: 1 }}>
+                    {label}
+                </Text>
+                <Text className="text-muted-foreground" style={{ fontSize: 12 }}>
                     {isDone ? 'Done' : p.phase === 'scanning' ? 'Scanning...' : `${pct}%`}
                 </Text>
             </View>
 
-            <View className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: `${primaryColor}20` }}>
-                <View
-                    className="h-full rounded-full"
-                    style={{
-                        width: `${pct}%`,
-                        backgroundColor: primaryColor,
-                    }}
-                />
+            <View className="h-1.5 rounded-full overflow-hidden bg-primary/20">
+                <View className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
             </View>
 
             <View className="flex-row gap-4">
-                <Text style={{ fontSize: 12, color: mutedColor }}>{p.imported} imported</Text>
+                <Text className="text-muted-foreground" style={{ fontSize: 12 }}>
+                    {p.imported} imported
+                </Text>
                 <SkippedCount isVisible={p.skipped > 0} count={p.skipped} />
-                <ErrorCount isVisible={p.errors > 0} count={p.errors} color={dangerColor} />
+                <ErrorCount isVisible={p.errors > 0} count={p.errors} />
             </View>
 
             <ErrorDetails
@@ -396,14 +352,21 @@ function ServiceProgressCard({ progress: p }: { progress: ImportProgress }) {
 }
 
 function SkippedCount({ isVisible, count }: { isVisible: boolean; count: number }) {
-    const mutedColor = useThemeColor('muted-foreground')
     if (!isVisible) return null
-    return <Text style={{ fontSize: 12, color: mutedColor }}>{count} skipped</Text>
+    return (
+        <Text className="text-muted-foreground" style={{ fontSize: 12 }}>
+            {count} skipped
+        </Text>
+    )
 }
 
-function ErrorCount({ isVisible, count, color }: { isVisible: boolean; count: number; color: string }) {
+function ErrorCount({ isVisible, count }: { isVisible: boolean; count: number }) {
     if (!isVisible) return null
-    return <Text style={{ fontSize: 12, color }}>{count} errors</Text>
+    return (
+        <Text className="text-danger" style={{ fontSize: 12 }}>
+            {count} errors
+        </Text>
+    )
 }
 
 function ErrorDetails({
@@ -418,7 +381,6 @@ function ErrorDetails({
     onToggle: () => void
 }) {
     const mutedColor = useThemeColor('muted-foreground')
-    const dangerColor = useThemeColor('danger')
 
     if (!isVisible) return null
 
@@ -426,12 +388,14 @@ function ErrorDetails({
         <View>
             <Pressable onPress={onToggle} className="flex-row items-center gap-1">
                 {showErrors ? <ChevronUp size={14} color={mutedColor} /> : <ChevronDown size={14} color={mutedColor} />}
-                <Text style={{ fontSize: 12, color: mutedColor }}>{showErrors ? 'Hide errors' : 'Show errors'}</Text>
+                <Text className="text-muted-foreground" style={{ fontSize: 12 }}>
+                    {showErrors ? 'Hide errors' : 'Show errors'}
+                </Text>
             </Pressable>
             {showErrors && (
                 <View className="mt-1 gap-0.5">
                     {messages.slice(0, 20).map((msg) => (
-                        <Text key={msg} style={{ fontSize: 11, color: dangerColor }}>
+                        <Text key={msg} className="text-danger" style={{ fontSize: 11 }}>
                             {msg}
                         </Text>
                     ))}
@@ -443,9 +407,12 @@ function ErrorDetails({
 }
 
 function RemainingErrors({ isVisible, count }: { isVisible: boolean; count: number }) {
-    const mutedColor = useThemeColor('muted-foreground')
     if (!isVisible) return null
-    return <Text style={{ fontSize: 11, color: mutedColor }}>...and {count} more</Text>
+    return (
+        <Text className="text-muted-foreground" style={{ fontSize: 11 }}>
+            ...and {count} more
+        </Text>
+    )
 }
 
 function TakeoutCompleteState({
@@ -459,8 +426,6 @@ function TakeoutCompleteState({
     progress: Record<ImportService, ImportProgress>
     onReset: () => void
 }) {
-    const foregroundColor = useThemeColor('foreground')
-    const mutedColor = useThemeColor('muted-foreground')
     const primaryColor = useThemeColor('primary')
 
     if (!isVisible) return null
@@ -472,18 +437,18 @@ function TakeoutCompleteState({
     return (
         <View className="gap-3 items-center py-4">
             <Check size={32} color={primaryColor} />
-            <Text style={{ fontSize: 16, fontWeight: '600', color: foregroundColor }}>Import Complete</Text>
-            <Text style={{ fontSize: 13, color: mutedColor, textAlign: 'center' }}>
+            <Text className="text-foreground" style={{ fontSize: 16, fontWeight: '600' }}>
+                Import Complete
+            </Text>
+            <Text className="text-muted-foreground" style={{ fontSize: 13, textAlign: 'center' }}>
                 {totalImported} records imported
                 {totalSkipped > 0 ? `, ${totalSkipped} skipped` : ''}
                 {totalErrors > 0 ? `, ${totalErrors} errors` : ''}
             </Text>
-            <Pressable
-                onPress={onReset}
-                className="px-4 py-2.5 rounded-lg border mt-2"
-                style={{ borderColor: mutedColor }}
-            >
-                <Text style={{ color: foregroundColor, fontSize: 14 }}>Import More</Text>
+            <Pressable onPress={onReset} className="px-4 py-2.5 rounded-lg border border-muted-foreground mt-2">
+                <Text className="text-foreground" style={{ fontSize: 14 }}>
+                    Import More
+                </Text>
             </Pressable>
         </View>
     )
@@ -498,25 +463,23 @@ function TakeoutErrorState({
     error: string | null
     onReset: () => void
 }) {
-    const foregroundColor = useThemeColor('foreground')
     const dangerColor = useThemeColor('danger')
-    const mutedColor = useThemeColor('muted-foreground')
 
     if (!isVisible) return null
 
     return (
         <View className="gap-3 items-center py-4">
             <AlertTriangle size={32} color={dangerColor} />
-            <Text style={{ fontSize: 16, fontWeight: '600', color: foregroundColor }}>Import Failed</Text>
-            <Text style={{ fontSize: 13, color: dangerColor, textAlign: 'center' }}>
+            <Text className="text-foreground" style={{ fontSize: 16, fontWeight: '600' }}>
+                Import Failed
+            </Text>
+            <Text className="text-danger" style={{ fontSize: 13, textAlign: 'center' }}>
                 {error || 'An unknown error occurred'}
             </Text>
-            <Pressable
-                onPress={onReset}
-                className="px-4 py-2.5 rounded-lg border mt-2"
-                style={{ borderColor: mutedColor }}
-            >
-                <Text style={{ color: foregroundColor, fontSize: 14 }}>Try Again</Text>
+            <Pressable onPress={onReset} className="px-4 py-2.5 rounded-lg border border-muted-foreground mt-2">
+                <Text className="text-foreground" style={{ fontSize: 14 }}>
+                    Try Again
+                </Text>
             </Pressable>
         </View>
     )
