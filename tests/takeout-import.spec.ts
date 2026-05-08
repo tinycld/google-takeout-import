@@ -65,7 +65,9 @@ test.describe('Google Takeout Import', () => {
 
         // Verify contact details (email) were parsed from grouped vCard properties
         await page.getByText('Bob McGee').first().click()
-        await expect(page.getByText('bobby@bob.com')).toBeVisible({ timeout: 10_000 })
+        // Email shows in both the row preview and the detail header — first()
+        // matches whichever renders first.
+        await expect(page.getByText('bobby@bob.com').first()).toBeVisible({ timeout: 10_000 })
     })
 
     test('verify calendar events match takeout data', async ({ page }) => {
