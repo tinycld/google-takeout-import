@@ -28,13 +28,14 @@ jobs:
           ref: ${{ env.APP_REF }}
           path: tinycld
       - uses: oven-sh/setup-bun@v2
-      - name: Install tinycld deps (biome + typescript come from here)
+      - name: Install tinycld deps (biome lives here)
         working-directory: tinycld
         run: bun install
-      - name: expose tinycld's node_modules to google-takeout-import
-        run: ln -s ../tinycld/node_modules google-takeout-import/node_modules
-      - name: Lint google-takeout-import
-        working-directory: google-takeout-import
+      - name: Link google-takeout-import into tinycld so biome scans it
+        working-directory: tinycld
+        run: bun run packages:link ../google-takeout-import
+      - name: Lint (biome runs from tinycld; scans linked package via app rules)
+        working-directory: tinycld
         run: bun run lint
 
   typecheck:
