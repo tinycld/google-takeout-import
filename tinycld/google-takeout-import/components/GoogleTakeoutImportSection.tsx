@@ -2,7 +2,7 @@ import { usePackages } from '@tinycld/core/lib/packages/use-packages'
 import { useThemeColor } from '@tinycld/core/lib/use-app-theme'
 import { useCurrentRole } from '@tinycld/core/lib/use-current-role'
 import { useOrgInfo } from '@tinycld/core/lib/use-org-info'
-import { ThemedSwitch } from '@tinycld/core/ui/ThemedSwitch'
+import { Switch } from '@tinycld/core/ui/switch'
 import {
     AlertTriangle,
     Calendar,
@@ -193,7 +193,7 @@ function TakeoutDetectedState({
                             disabled={!detected}
                             className="flex-row items-center gap-3 py-2"
                         >
-                            <ThemedSwitch
+                            <Switch
                                 value={detected && selected}
                                 disabled={!detected}
                                 style={{ transform: [{ scale: 0.75 }], pointerEvents: 'none' }}
