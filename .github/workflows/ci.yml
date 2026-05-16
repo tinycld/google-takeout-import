@@ -27,18 +27,20 @@ jobs:
           repository: ${{ env.APP_REPO }}
           ref: ${{ env.APP_REF }}
           path: tinycld
-      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
         with:
-          version: 11.1.1
+          node-version-file: tinycld/.node-version
+          cache: npm
+          cache-dependency-path: tinycld/package-lock.json
       - name: Install tinycld deps (biome lives here)
         working-directory: tinycld
-        run: pnpm install --frozen-lockfile
+        run: npm ci
       - name: Link google-takeout-import into tinycld so biome scans it
         working-directory: tinycld
-        run: pnpm run packages:link ../google-takeout-import
+        run: npm run packages:link ../google-takeout-import
       - name: Lint (biome runs from tinycld; scans linked package via app rules)
         working-directory: tinycld
-        run: pnpm run lint
+        run: npm run lint
 
   typecheck:
     name: Typecheck
@@ -52,22 +54,21 @@ jobs:
           repository: ${{ env.APP_REPO }}
           ref: ${{ env.APP_REF }}
           path: tinycld
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.1.1
       - uses: actions/setup-node@v5
         with:
           node-version-file: tinycld/.node-version
+          cache: npm
+          cache-dependency-path: tinycld/package-lock.json
       - uses: actions/setup-go@v6
         with:
           go-version-file: tinycld/server/go.mod
           cache-dependency-path: tinycld/server/go.sum
       - name: Install tinycld deps
         working-directory: tinycld
-        run: pnpm install --frozen-lockfile
+        run: npm ci
       - name: Link google-takeout-import into tinycld
         working-directory: tinycld
-        run: pnpm run packages:link ../google-takeout-import
+        run: npm run packages:link ../google-takeout-import
       - name: Generate PB schema types
         working-directory: tinycld
         run: |
@@ -81,7 +82,7 @@ jobs:
         working-directory: google-takeout-import
         env:
           NODE_OPTIONS: --preserve-symlinks
-        run: pnpm run typecheck
+        run: npm run typecheck
 
   test:
     name: Unit & E2E tests
@@ -118,12 +119,11 @@ jobs:
           repository: tinycld/drive
           ref: main
           path: drive
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.1.1
       - uses: actions/setup-node@v5
         with:
           node-version-file: tinycld/.node-version
+          cache: npm
+          cache-dependency-path: tinycld/package-lock.json
       - uses: actions/setup-go@v6
         with:
           go-version-file: tinycld/server/go.mod
@@ -131,16 +131,16 @@ jobs:
 
       - name: Install tinycld deps
         working-directory: tinycld
-        run: pnpm install --frozen-lockfile
+        run: npm ci
 
       - name: Link all data packages + google-takeout-import into tinycld
         working-directory: tinycld
         run: |
-          pnpm run packages:link ../contacts
-          pnpm run packages:link ../mail
-          pnpm run packages:link ../calendar
-          pnpm run packages:link ../drive
-          pnpm run packages:link ../google-takeout-import
+          npm run packages:link ../contacts
+          npm run packages:link ../mail
+          npm run packages:link ../calendar
+          npm run packages:link ../drive
+          npm run packages:link ../google-takeout-import
 
       - name: Build PocketBase binary
         working-directory: tinycld/server
@@ -148,25 +148,25 @@ jobs:
 
       - name: Run unit tests (vitest picks up google-takeout-import via packages glob)
         working-directory: tinycld
-        run: pnpm exec vitest run packages/@tinycld/google-takeout-import
+        run: npx vitest run packages/@tinycld/google-takeout-import
 
       - name: Reset test DB
         working-directory: tinycld
-        run: pnpm exec tsx scripts/reset-dev-db.ts --url http://127.0.0.1:7091 --data-dir server/pb_test_data
+        run: npx tsx scripts/reset-dev-db.ts --url http://127.0.0.1:7091 --data-dir server/pb_test_data
 
       - name: Cache Playwright browsers
         id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('tinycld/pnpm-lock.yaml') }}
+          key: playwright-${{ hashFiles('tinycld/package-lock.json') }}
       - name: Install Playwright browsers
         working-directory: tinycld
-        run: pnpm exec playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium
         if: steps.playwright-cache.outputs.cache-hit != 'true'
       - name: Install Playwright system deps
         working-directory: tinycld
-        run: pnpm exec playwright install-deps chromium
+        run: npx playwright install-deps chromium
         if: steps.playwright-cache.outputs.cache-hit == 'true'
 
       - name: Run Playwright tests (google-takeout-import project only)
@@ -174,7 +174,7 @@ jobs:
         env:
           CI: true
           NODE_OPTIONS: --preserve-symlinks
-        run: pnpm exec playwright test --project "@tinycld/google-takeout-import" --timeout=180000
+        run: npx playwright test --project "@tinycld/google-takeout-import" --timeout=180000
 
       - uses: actions/upload-artifact@v5
         if: ${{ !cancelled() }}
