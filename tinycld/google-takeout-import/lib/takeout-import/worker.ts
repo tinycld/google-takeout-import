@@ -78,7 +78,11 @@ async function runImport(services: ImportService[], files: File[]) {
             if (cancelled) return
             await inserter.insertRecords(records)
         },
-        onProgress: (service: ImportService, phase: 'scanning' | 'importing' | 'done', total: number) => {
+        onProgress: (
+            service: ImportService,
+            phase: 'scanning' | 'importing' | 'done',
+            total: number
+        ) => {
             post({ type: 'service-phase', service, phase, total })
         },
         onDone: () => {},

@@ -76,7 +76,7 @@ function ensureBridge(context: ImportContext): Bridge {
             onBridgeMessage(ref, event.data)
         }
         worker.addEventListener('message', onMessage)
-        worker.addEventListener('error', (event) => {
+        worker.addEventListener('error', event => {
             reject(new Error(event.message || 'Worker failed to start'))
         })
     })
@@ -108,7 +108,11 @@ export async function bridgeDetect(files: File[], context: ImportContext) {
     })
 }
 
-export async function bridgeRunImport(files: File[], services: ImportService[], context: ImportContext) {
+export async function bridgeRunImport(
+    files: File[],
+    services: ImportService[],
+    context: ImportContext
+) {
     const ref = ensureBridge(context)
     await ref.ready
     return new Promise<void>((resolve, reject) => {
