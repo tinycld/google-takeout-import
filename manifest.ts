@@ -10,6 +10,7 @@ const manifest = {
             label: 'Import from Google',
         },
     ],
+    repository: { url: 'https://github.com/tinycld/google-takeout-import' },
 }
 
 export default manifest
