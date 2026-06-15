@@ -29,7 +29,7 @@
         "fflate": "^0.8.2",
         "ical.js": "^2.2.1",
         "lucide-react-native": "^1.7.0",
-        "pbtsdb": ">=0.5",
+        "pbtsdb": ">=0.6.3",
         "pocketbase": "^0.26.8",
         "react": ">=19",
         "react-native": ">=0.83"
