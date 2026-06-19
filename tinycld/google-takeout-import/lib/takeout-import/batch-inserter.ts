@@ -1,3 +1,4 @@
+// biome-ignore-all lint/plugin/pbtsdb-no-raw-pb-access: dedicated bulk importer — operates on a raw PocketBase handle passed in (BatchInserterOptions.pb), outside React/the optimistic store, doing batched create + existence-check reads with retry/cancel/progress. Every pb access here is intentional, like the seed scripts.
 import { newRecordId } from 'pbtsdb/core'
 import type PocketBase from 'pocketbase'
 import type {
