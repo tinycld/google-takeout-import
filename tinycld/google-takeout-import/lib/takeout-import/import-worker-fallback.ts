@@ -3,7 +3,7 @@ import { parseCalendars } from './parsers/calendar'
 import { parseContacts } from './parsers/contacts'
 import { driveRecordsInOrder, parseDriveEntries } from './parsers/drive'
 import { countMboxMessages, parseMbox } from './parsers/mail'
-import type { ImportService, ParsedRecord, TakeoutDetection } from './types'
+import type { ImportService, ParsedRecord, TakeoutDetection, TakeoutFile } from './types'
 
 const BATCH_SIZE = 50
 
@@ -11,7 +11,7 @@ function yieldToUI(): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, 0))
 }
 
-async function extractAllZips(files: File[]): Promise<Map<string, Uint8Array>> {
+async function extractAllZips(files: TakeoutFile[]): Promise<Map<string, Uint8Array>> {
     const entries = new Map<string, Uint8Array>()
 
     for (const file of files) {
@@ -85,7 +85,7 @@ export interface FallbackCallbacks {
 }
 
 export async function runFallbackImport(
-    files: File[],
+    files: TakeoutFile[],
     services: ImportService[],
     callbacks: FallbackCallbacks
 ) {
@@ -154,7 +154,7 @@ async function processBatches(
     callbacks.onProgress(service, 'done', records.length)
 }
 
-export async function detectOnly(files: File[]): Promise<TakeoutDetection> {
+export async function detectOnly(files: TakeoutFile[]): Promise<TakeoutDetection> {
     const entries = await extractAllZips(files)
     return detectServices(entries)
 }

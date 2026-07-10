@@ -3,7 +3,7 @@ import { pb } from '@tinycld/core/lib/pocketbase'
 import { useTakeoutImportStore } from '@tinycld/core/lib/stores/takeout-import-store'
 import { createBatchInserter } from './batch-inserter'
 import { detectOnly, runFallbackImport } from './import-worker-fallback'
-import type { ImportContext, ImportService, TakeoutDetection } from './types'
+import type { ImportContext, ImportService, TakeoutDetection, TakeoutFile } from './types'
 
 const SERVICE_FOR_RECORD: Record<string, ImportService> = {
     contact: 'contacts',
@@ -14,12 +14,15 @@ const SERVICE_FOR_RECORD: Record<string, ImportService> = {
     mail_thread: 'mail',
 }
 
-export async function detect(files: File[], _context: ImportContext): Promise<TakeoutDetection> {
+export async function detect(
+    files: TakeoutFile[],
+    _context: ImportContext
+): Promise<TakeoutDetection> {
     return detectOnly(files)
 }
 
 export async function runImport(
-    files: File[],
+    files: TakeoutFile[],
     services: ImportService[],
     context: ImportContext
 ): Promise<void> {

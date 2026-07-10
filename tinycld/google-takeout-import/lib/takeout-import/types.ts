@@ -1,5 +1,15 @@
 export type ImportService = 'contacts' | 'calendar' | 'drive' | 'mail'
 
+/**
+ * Minimal file shape the import pipeline reads. Web supplies real DOM `File`
+ * objects; native supplies wrappers that lazily read the picked document's
+ * bytes from its URI (see `nativeTakeoutFile` in ./index.ts).
+ */
+export interface TakeoutFile {
+    name: string
+    arrayBuffer(): Promise<ArrayBuffer>
+}
+
 export type ImportPhase = 'scanning' | 'importing' | 'done'
 
 export interface ImportProgress {
