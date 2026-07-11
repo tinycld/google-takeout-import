@@ -1,14 +1,22 @@
 import ICAL from 'ical.js'
 import type { ParsedContact } from '../types'
 
+/** True for entry paths the contacts importer owns. */
+export function isContactsPath(path: string): boolean {
+    return path.includes('Contacts/') && path.endsWith('.vcf')
+}
+
+/** Parse the contacts in a single `.vcf` entry's bytes. */
+export function parseContactsEntry(data: Uint8Array): ParsedContact[] {
+    return parseVcfText(new TextDecoder().decode(data))
+}
+
 export function parseContacts(entries: Map<string, Uint8Array>): ParsedContact[] {
     const contacts: ParsedContact[] = []
-    const decoder = new TextDecoder()
 
     for (const [path, data] of entries) {
-        if (!path.includes('Contacts/') || !path.endsWith('.vcf')) continue
-        const text = decoder.decode(data)
-        contacts.push(...parseVcfText(text))
+        if (!isContactsPath(path)) continue
+        contacts.push(...parseContactsEntry(data))
     }
 
     return contacts

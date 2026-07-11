@@ -1,62 +1,70 @@
-import { unzip } from 'fflate'
-import { parseCalendars } from './parsers/calendar'
-import { parseContacts } from './parsers/contacts'
-import { driveRecordsInOrder, parseDriveEntries } from './parsers/drive'
-import { countMboxMessages, parseMbox } from './parsers/mail'
-import type { ImportService, ParsedRecord, TakeoutDetection, TakeoutFile } from './types'
+import { isCalendarPath, parseCalendarEntry } from './parsers/calendar'
+import { isContactsPath, parseContactsEntry } from './parsers/contacts'
+import { countDriveFiles, driveFileFromEntry, foldersFromPaths, isDrivePath } from './parsers/drive'
+import { countMboxMessagesInBytes, isMboxPath, parseMboxStream } from './parsers/mail'
+import { scanZipEntries, streamZipEntries } from './streaming-unzip'
+import type {
+    ImportContext,
+    ImportService,
+    ParsedRecord,
+    TakeoutDetection,
+    TakeoutFile,
+} from './types'
 
 const BATCH_SIZE = 50
+
+// Uncompressed-size ceiling. Even with streaming, an absurdly large export is
+// rejected up front with a clear message rather than being attempted. Gmail's
+// largest single-archive Takeout is ~2 GB; 8 GB across all selected zips is a
+// generous belt-and-suspenders limit that still fits comfortably below the
+// point where PocketBase uploads would dominate wall-clock time anyway.
+export const MAX_TOTAL_UNCOMPRESSED_BYTES = 8 * 1024 * 1024 * 1024
 
 function yieldToUI(): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, 0))
 }
 
-async function extractAllZips(files: TakeoutFile[]): Promise<Map<string, Uint8Array>> {
-    const entries = new Map<string, Uint8Array>()
-
-    for (const file of files) {
-        const buffer = await file.arrayBuffer()
-        const uint8 = new Uint8Array(buffer)
-
-        const unzipped = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
-            unzip(uint8, (err, result) => {
-                if (err) reject(err)
-                else resolve(result)
-            })
-        })
-
-        for (const [path, data] of Object.entries(unzipped)) {
-            entries.set(path, data)
-        }
-    }
-
-    return entries
+function tooLargeMessage(totalBytes: number): string {
+    const gb = (totalBytes / (1024 * 1024 * 1024)).toFixed(1)
+    return `This export is too large to import (${gb} GB uncompressed). Split your Google Takeout archive into smaller downloads and import them one at a time.`
 }
 
-function detectServices(entries: Map<string, Uint8Array>): TakeoutDetection {
-    let hasContacts = false
-    let hasCalendar = false
-    let hasDrive = false
-    let hasMail = false
+/**
+ * Detect which services an export contains, plus record counts, by reading the
+ * zip directory and decompressing only the small metadata artifacts (mbox for a
+ * message count, `.vcf`/`.ics` for contact/event counts). Drive-file and
+ * attachment payloads are never decompressed here — detection stays cheap.
+ */
+export async function detectOnly(files: TakeoutFile[]): Promise<TakeoutDetection> {
+    const drivePaths: string[] = []
+    let contactCount = 0
+    let eventCount = 0
+    let mailThreadCount = 0
     let fileCount = 0
-    let totalSize = 0
 
-    for (const [path, data] of entries) {
-        fileCount++
-        totalSize += data.byteLength
+    const totalSize = await scanZipEntries(
+        files,
+        entry => {
+            fileCount++
+            if (isDrivePath(entry.path)) drivePaths.push(entry.path)
+            // Only decompress the small metadata artifacts we must read to count.
+            return (
+                isMboxPath(entry.path) || isContactsPath(entry.path) || isCalendarPath(entry.path)
+            )
+        },
+        (path, bytes) => {
+            if (isMboxPath(path)) {
+                mailThreadCount += countMboxMessagesInBytes(bytes)
+            } else if (isContactsPath(path)) {
+                contactCount += parseContactsEntry(bytes).length
+            } else if (isCalendarPath(path)) {
+                const cal = parseCalendarEntry(path, bytes)
+                if (cal) eventCount += cal.events.length
+            }
+        }
+    )
 
-        if (path.includes('Contacts/') && path.endsWith('.vcf')) hasContacts = true
-        if (path.includes('Calendar/') && path.endsWith('.ics')) hasCalendar = true
-        if (path.startsWith('Takeout/Drive/')) hasDrive = true
-        if (path.includes('Mail/') && path.endsWith('.mbox')) hasMail = true
-    }
-
-    const contactCount = hasContacts ? parseContacts(entries).length : 0
-    const eventCount = hasCalendar
-        ? parseCalendars(entries).reduce((sum, c) => sum + c.events.length, 0)
-        : 0
-    const driveFileCount = hasDrive ? parseDriveEntries(entries).files.length : 0
-    const mailThreadCount = hasMail ? countMboxMessages(entries) : 0
+    const driveFileCount = countDriveFiles(drivePaths)
 
     return {
         hasContacts: contactCount > 0,
@@ -73,7 +81,6 @@ function detectServices(entries: Map<string, Uint8Array>): TakeoutDetection {
 }
 
 export interface FallbackCallbacks {
-    onDetection: (detection: TakeoutDetection) => void
     onBatch: (service: ImportService, records: ParsedRecord[]) => Promise<void>
     onProgress: (
         service: ImportService,
@@ -82,79 +89,144 @@ export interface FallbackCallbacks {
     ) => void
     onDone: () => void
     onError: (message: string) => void
+    /**
+     * Expected record counts per service (from the detection shown to the user),
+     * used only to drive the progress bars. Streaming doesn't know counts up
+     * front, so these keep the percentages accurate; they never gate insertion.
+     */
+    expectedTotals?: Partial<Record<ImportService, number>>
+    /** Override the total-uncompressed-size ceiling. Test seam. */
+    maxTotalUncompressedBytes?: number
+}
+
+/**
+ * Buffers records for one service and flushes them to `onBatch` in fixed-size
+ * batches, so bytes carried by each record (drive-file / attachment payloads)
+ * are released as soon as the batch is inserted rather than held for the whole
+ * run. Progress is reported as the batches drain.
+ */
+function createServiceSink(service: ImportService, callbacks: FallbackCallbacks) {
+    const buffer: ParsedRecord[] = []
+
+    async function flush() {
+        if (buffer.length === 0) return
+        const batch = buffer.splice(0, buffer.length)
+        await callbacks.onBatch(service, batch)
+        await yieldToUI()
+    }
+
+    return {
+        async add(record: ParsedRecord) {
+            buffer.push(record)
+            if (buffer.length >= BATCH_SIZE) await flush()
+        },
+        async addMany(records: ParsedRecord[]) {
+            for (const record of records) {
+                buffer.push(record)
+                if (buffer.length >= BATCH_SIZE) await flush()
+            }
+        },
+        flush,
+    }
 }
 
 export async function runFallbackImport(
     files: TakeoutFile[],
     services: ImportService[],
+    context: ImportContext,
     callbacks: FallbackCallbacks
 ) {
     try {
-        const entries = await extractAllZips(files)
-        const detection = detectServices(entries)
-        callbacks.onDetection(detection)
+        // Pre-flight (Guard B): mail requires a resolved mailbox. Throwing here
+        // converts a silent 0-thread import into a visible, retryable error.
+        if (services.includes('mail') && !context.mailboxId) {
+            throw new Error('Mail selected but no mailbox is ready — try again in a moment.')
+        }
 
+        // Single lightweight names/sizes scan: no payloads are decompressed. It
+        // yields the folder tree (for parents-first drive insertion), the size
+        // guard total, and lets us surface per-service progress totals before
+        // the heavy streaming pass.
+        const drivePaths: string[] = []
+        const totalSize = await scanZipEntries(
+            files,
+            entry => {
+                if (isDrivePath(entry.path)) drivePaths.push(entry.path)
+                return false
+            },
+            () => {}
+        )
+
+        const maxBytes = callbacks.maxTotalUncompressedBytes ?? MAX_TOTAL_UNCOMPRESSED_BYTES
+        if (totalSize > maxBytes) {
+            throw new Error(tooLargeMessage(totalSize))
+        }
+
+        const wantContacts = services.includes('contacts')
+        const wantCalendar = services.includes('calendar')
+        const wantDrive = services.includes('drive')
+        const wantMail = services.includes('mail')
+        const totals = callbacks.expectedTotals ?? {}
+
+        const driveFolders = wantDrive ? foldersFromPaths(drivePaths) : []
+        const driveTotal = driveFolders.length + countDriveFiles(drivePaths)
+
+        const contactsSink = createServiceSink('contacts', callbacks)
+        const calendarSink = createServiceSink('calendar', callbacks)
+        const driveSink = createServiceSink('drive', callbacks)
+        const mailSink = createServiceSink('mail', callbacks)
+
+        if (wantContacts) callbacks.onProgress('contacts', 'scanning', 0)
+        if (wantCalendar) callbacks.onProgress('calendar', 'scanning', 0)
+        if (wantDrive) callbacks.onProgress('drive', 'scanning', 0)
+        if (wantMail) callbacks.onProgress('mail', 'scanning', 0)
         await yieldToUI()
 
-        if (services.includes('contacts')) {
-            callbacks.onProgress('contacts', 'scanning', 0)
-            await yieldToUI()
-            const contacts = parseContacts(entries)
-            callbacks.onProgress('contacts', 'importing', contacts.length)
-            await processBatches('contacts', contacts, callbacks)
+        // Drive folders come from entry names only — insert them first so files
+        // (streamed next) resolve their parents. Their bytes never materialize.
+        if (wantDrive) {
+            callbacks.onProgress('drive', 'importing', driveTotal)
+            await driveSink.addMany(driveFolders)
+            await driveSink.flush()
         }
 
-        if (services.includes('calendar')) {
-            callbacks.onProgress('calendar', 'scanning', 0)
-            await yieldToUI()
-            const calendars = parseCalendars(entries)
-            const allRecords: ParsedRecord[] = []
-            for (const cal of calendars) {
-                allRecords.push(cal)
-                allRecords.push(...cal.events)
+        if (wantContacts) callbacks.onProgress('contacts', 'importing', totals.contacts ?? 0)
+        if (wantCalendar) callbacks.onProgress('calendar', 'importing', totals.calendar ?? 0)
+        if (wantMail) callbacks.onProgress('mail', 'importing', totals.mail ?? 0)
+
+        // Single heavy pass: decompress each entry once, route its bytes to the
+        // owning service, and release them as each batch flushes.
+        await streamZipEntries(files, async (path, bytes) => {
+            if (wantDrive && isDrivePath(path)) {
+                const file = driveFileFromEntry(path, bytes)
+                if (file) await driveSink.add(file)
+            } else if (wantContacts && isContactsPath(path)) {
+                await contactsSink.addMany(parseContactsEntry(bytes))
+            } else if (wantCalendar && isCalendarPath(path)) {
+                const cal = parseCalendarEntry(path, bytes)
+                if (cal) {
+                    await calendarSink.add(cal)
+                    await calendarSink.addMany(cal.events)
+                }
+            } else if (wantMail && isMboxPath(path)) {
+                for (const thread of parseMboxStream(bytes)) {
+                    await mailSink.add(thread)
+                }
             }
-            callbacks.onProgress('calendar', 'importing', allRecords.length)
-            await processBatches('calendar', allRecords, callbacks)
-        }
+        })
 
-        if (services.includes('drive')) {
-            callbacks.onProgress('drive', 'scanning', 0)
-            await yieldToUI()
-            const { folders, files: driveFiles } = parseDriveEntries(entries)
-            const records = driveRecordsInOrder(folders, driveFiles)
-            callbacks.onProgress('drive', 'importing', records.length)
-            await processBatches('drive', records, callbacks)
-        }
+        await contactsSink.flush()
+        await calendarSink.flush()
+        await driveSink.flush()
+        await mailSink.flush()
 
-        if (services.includes('mail')) {
-            callbacks.onProgress('mail', 'scanning', 0)
-            await yieldToUI()
-            const threads = parseMbox(entries)
-            callbacks.onProgress('mail', 'importing', threads.length)
-            await processBatches('mail', threads, callbacks)
-        }
+        if (wantContacts) callbacks.onProgress('contacts', 'done', totals.contacts ?? 0)
+        if (wantCalendar) callbacks.onProgress('calendar', 'done', totals.calendar ?? 0)
+        if (wantDrive) callbacks.onProgress('drive', 'done', driveTotal)
+        if (wantMail) callbacks.onProgress('mail', 'done', totals.mail ?? 0)
 
         callbacks.onDone()
     } catch (err) {
         callbacks.onError(err instanceof Error ? err.message : 'Import failed')
     }
-}
-
-async function processBatches(
-    service: ImportService,
-    records: ParsedRecord[],
-    callbacks: FallbackCallbacks
-) {
-    for (let i = 0; i < records.length; i += BATCH_SIZE) {
-        const batch = records.slice(i, i + BATCH_SIZE)
-        await callbacks.onBatch(service, batch)
-        callbacks.onProgress(service, 'importing', records.length)
-        await yieldToUI()
-    }
-    callbacks.onProgress(service, 'done', records.length)
-}
-
-export async function detectOnly(files: TakeoutFile[]): Promise<TakeoutDetection> {
-    const entries = await extractAllZips(files)
-    return detectServices(entries)
 }
