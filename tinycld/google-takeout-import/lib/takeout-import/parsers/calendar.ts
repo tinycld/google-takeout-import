@@ -1,15 +1,25 @@
 import ICAL from 'ical.js'
 import type { EventGuest, ParsedCalendar, ParsedCalendarEvent } from '../types'
 
+/** True for entry paths the calendar importer owns. */
+export function isCalendarPath(path: string): boolean {
+    return path.includes('Calendar/') && path.endsWith('.ics')
+}
+
+/** Parse a single `.ics` entry's bytes into a calendar (or null when empty). */
+export function parseCalendarEntry(path: string, data: Uint8Array): ParsedCalendar | null {
+    const cal = parseIcsText(new TextDecoder().decode(data), path)
+    if (cal && cal.events.length > 0) return cal
+    return null
+}
+
 export function parseCalendars(entries: Map<string, Uint8Array>): ParsedCalendar[] {
     const calendars: ParsedCalendar[] = []
-    const decoder = new TextDecoder()
 
     for (const [path, data] of entries) {
-        if (!path.includes('Calendar/') || !path.endsWith('.ics')) continue
-        const text = decoder.decode(data)
-        const cal = parseIcsText(text, path)
-        if (cal && cal.events.length > 0) calendars.push(cal)
+        if (!isCalendarPath(path)) continue
+        const cal = parseCalendarEntry(path, data)
+        if (cal) calendars.push(cal)
     }
 
     return calendars

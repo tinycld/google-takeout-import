@@ -30,7 +30,7 @@ const SERVICE_META: Record<ImportService, { label: string; Icon: typeof Users }>
 export function GoogleTakeoutImportSection() {
     const { orgId } = useOrgInfo()
     const { userOrgId } = useCurrentRole()
-    const mailboxId = useDefaultMailbox()
+    const { mailboxId, loading: mailboxLoading } = useDefaultMailbox()
     const packages = usePackages()
     const installedSlugs = new Set(packages.map(p => p.slug))
 
@@ -42,12 +42,21 @@ export function GoogleTakeoutImportSection() {
 
     const { detection, phase, overallError, progress, activeServices, selectedServices } = store
 
+    const mailInstalledAndDetected = !!detection?.hasMail && installedSlugs.has('mail')
+
     const detectedServices: ImportService[] = []
     if (detection?.hasContacts && installedSlugs.has('contacts')) detectedServices.push('contacts')
     if (detection?.hasCalendar && installedSlugs.has('calendar')) detectedServices.push('calendar')
     if (detection?.hasDrive && installedSlugs.has('drive')) detectedServices.push('drive')
-    if (detection?.hasMail && installedSlugs.has('mail') && mailboxId) detectedServices.push('mail')
-    const mailDetectedNoMailbox = detection?.hasMail && installedSlugs.has('mail') && !mailboxId
+    if (mailInstalledAndDetected && mailboxId) detectedServices.push('mail')
+
+    // Only warn once the mailbox lookup has resolved, so a slow fetch doesn't
+    // flash "no mailbox" before the mailbox actually loads.
+    const mailDetectedNoMailbox = mailInstalledAndDetected && !mailboxLoading && !mailboxId
+    // Mail is wanted but the mailbox is still loading — block Start Import until
+    // it resolves so we never launch a mail import with a null mailbox.
+    const mailWantedButMailboxLoading =
+        mailInstalledAndDetected && mailboxLoading && selectedServices.mail
 
     const effectiveSelectedServices = {
         ...selectedServices,
@@ -81,7 +90,8 @@ export function GoogleTakeoutImportSection() {
                     detectedServices={detectedServices}
                     selectedServices={effectiveSelectedServices}
                     onToggleService={store.toggleService}
-                    mailDetectedNoMailbox={!!mailDetectedNoMailbox}
+                    mailDetectedNoMailbox={mailDetectedNoMailbox}
+                    startDisabled={mailWantedButMailboxLoading}
                     onStartImport={handleStartImport}
                     onSelectFiles={selectFiles}
                 />
@@ -91,7 +101,6 @@ export function GoogleTakeoutImportSection() {
                     progress={progress}
                     onCancel={requestCancel}
                     cancelRequested={store.cancelRequested}
-                    fallbackActive={store.fallbackActive}
                 />
                 <TakeoutCompleteState
                     isVisible={phase === 'complete'}
@@ -161,6 +170,7 @@ function TakeoutDetectedState({
     selectedServices,
     onToggleService,
     mailDetectedNoMailbox,
+    startDisabled,
     onStartImport,
     onSelectFiles,
 }: {
@@ -170,6 +180,7 @@ function TakeoutDetectedState({
     selectedServices: Record<ImportService, boolean>
     onToggleService: (svc: ImportService) => void
     mailDetectedNoMailbox: boolean
+    startDisabled: boolean
     onStartImport: () => void
     onSelectFiles: () => void
 }) {
@@ -193,6 +204,7 @@ function TakeoutDetectedState({
     }
 
     const hasSelection = detectedServices.some(s => selectedServices[s])
+    const canStart = hasSelection && !startDisabled
 
     return (
         <View className="gap-4">
@@ -237,8 +249,8 @@ function TakeoutDetectedState({
             <View className="flex-row gap-3">
                 <Pressable
                     onPress={onStartImport}
-                    className={`px-4 py-2.5 rounded-lg ${hasSelection ? 'bg-primary' : 'bg-muted-foreground'}`}
-                    disabled={!hasSelection}
+                    className={`px-4 py-2.5 rounded-lg ${canStart ? 'bg-primary' : 'bg-muted-foreground'}`}
+                    disabled={!canStart}
                 >
                     <Text className="text-white" style={{ fontWeight: '600', fontSize: 14 }}>
                         Start Import
@@ -274,24 +286,17 @@ function TakeoutImportingState({
     progress,
     onCancel,
     cancelRequested,
-    fallbackActive,
 }: {
     isVisible: boolean
     activeServices: ImportService[]
     progress: Record<ImportService, ImportProgress>
     onCancel: () => void
     cancelRequested: boolean
-    fallbackActive: boolean
 }) {
     if (!isVisible) return null
 
     return (
         <View className="gap-3">
-            {fallbackActive ? (
-                <Text className="text-xs text-muted-foreground text-center">
-                    Background worker unavailable — importing in the foreground.
-                </Text>
-            ) : null}
             {activeServices.map(svc => (
                 <ServiceProgressCard key={svc} progress={progress[svc]} />
             ))}

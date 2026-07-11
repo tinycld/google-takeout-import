@@ -5,6 +5,10 @@ import { createBatchInserter } from './batch-inserter'
 import { detectOnly, runFallbackImport } from './import-worker-fallback'
 import type { ImportContext, ImportService, TakeoutDetection, TakeoutFile } from './types'
 
+// Native has always run the import on the main thread (no Web Worker). Web now
+// does too; the two files are kept only for Metro's platform-suffix resolution
+// and behave identically.
+
 const SERVICE_FOR_RECORD: Record<string, ImportService> = {
     contact: 'contacts',
     calendar: 'calendar',
@@ -26,6 +30,19 @@ export async function runImport(
     services: ImportService[],
     context: ImportContext
 ): Promise<void> {
+    await runOnMainThread(files, services, context)
+}
+
+export function requestCancel() {
+    useTakeoutImportStore.getState().requestCancel()
+}
+
+async function runOnMainThread(
+    files: TakeoutFile[],
+    services: ImportService[],
+    context: ImportContext
+) {
+    const store = useTakeoutImportStore.getState()
     const inserter = createBatchInserter({
         pb,
         context,
@@ -37,8 +54,7 @@ export async function runImport(
         onException: captureException,
     })
 
-    await runFallbackImport(files, services, {
-        onDetection: () => {},
+    await runFallbackImport(files, services, context, {
         onBatch: async (_service, records) => {
             await inserter.insertRecords(records)
         },
@@ -49,9 +65,10 @@ export async function runImport(
         onError: message => {
             throw new Error(message)
         },
+        expectedTotals: {
+            contacts: store.detection?.contactCount,
+            calendar: store.detection?.eventCount,
+            mail: store.detection?.mailThreadCount,
+        },
     })
-}
-
-export function requestCancel() {
-    useTakeoutImportStore.getState().requestCancel()
 }

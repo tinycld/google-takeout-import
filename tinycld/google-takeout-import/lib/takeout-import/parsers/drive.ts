@@ -1,4 +1,4 @@
-import type { ParsedDriveFile, ParsedDriveFolder, ParsedRecord } from '../types'
+import type { ParsedDriveFile, ParsedDriveFolder } from '../types'
 
 const DRIVE_PREFIX = 'Takeout/Drive/'
 
@@ -39,49 +39,51 @@ function inferMimeType(filename: string): string {
     return MIME_MAP[ext] || 'application/octet-stream'
 }
 
-export function parseDriveEntries(entries: Map<string, Uint8Array>): {
-    folders: ParsedDriveFolder[]
-    files: ParsedDriveFile[]
-} {
-    const folderPaths = new Set<string>()
-    const files: ParsedDriveFile[] = []
+/** True for entry paths the drive importer owns (files, not Google metadata). */
+export function isDrivePath(path: string): boolean {
+    if (!path.startsWith(DRIVE_PREFIX)) return false
+    const relativePath = path.slice(DRIVE_PREFIX.length)
+    if (!relativePath) return false
+    if (path.endsWith('/')) return false
+    if (relativePath.endsWith('-metadata.json')) return false
+    return true
+}
 
-    for (const [path, data] of entries) {
+/** Number of importable drive files, counted from entry names alone. */
+export function countDriveFiles(paths: Iterable<string>): number {
+    let count = 0
+    for (const path of paths) {
+        if (isDrivePath(path)) count++
+    }
+    return count
+}
+
+/**
+ * Derive the folder tree from entry *names* only (no decompression). Explicit
+ * directory entries and every parent directory of a file become folders,
+ * sorted parents-first so they can be inserted before their children.
+ */
+export function foldersFromPaths(paths: Iterable<string>): ParsedDriveFolder[] {
+    const folderPaths = new Set<string>()
+
+    for (const path of paths) {
         if (!path.startsWith(DRIVE_PREFIX)) continue
         const relativePath = path.slice(DRIVE_PREFIX.length)
         if (!relativePath) continue
-
-        // Skip metadata files Google adds
         if (relativePath.endsWith('-metadata.json')) continue
 
         if (path.endsWith('/')) {
-            // Directory entry
             folderPaths.add(relativePath.replace(/\/$/, ''))
             continue
         }
 
-        // File entry — collect parent directories
         const parts = relativePath.split('/')
         for (let i = 1; i < parts.length; i++) {
             folderPaths.add(parts.slice(0, i).join('/'))
         }
-
-        const parentPath = parts.slice(0, -1).join('/')
-        const name = parts[parts.length - 1]
-
-        files.push({
-            recordType: 'drive_file',
-            path: relativePath,
-            name,
-            parentPath,
-            mime_type: inferMimeType(name),
-            size: data.byteLength,
-            bytes: new Uint8Array(data).buffer as ArrayBuffer,
-        })
     }
 
-    // Sort folders by depth (parents first)
-    const sortedFolders = [...folderPaths]
+    return [...folderPaths]
         .filter(p => p.length > 0)
         .sort((a, b) => a.split('/').length - b.split('/').length)
         .map(
@@ -91,13 +93,27 @@ export function parseDriveEntries(entries: Map<string, Uint8Array>): {
                 name: path.split('/').pop() || path,
             })
         )
-
-    return { folders: sortedFolders, files }
 }
 
-export function driveRecordsInOrder(
-    folders: ParsedDriveFolder[],
-    files: ParsedDriveFile[]
-): ParsedRecord[] {
-    return [...folders, ...files]
+/**
+ * Build a drive-file record from a single streamed entry. The entry bytes flow
+ * straight into the record and on to the PocketBase create, then are released —
+ * they are never accumulated across files.
+ */
+export function driveFileFromEntry(path: string, data: Uint8Array): ParsedDriveFile | null {
+    if (!isDrivePath(path)) return null
+    const relativePath = path.slice(DRIVE_PREFIX.length)
+    const parts = relativePath.split('/')
+    const name = parts[parts.length - 1]
+    const parentPath = parts.slice(0, -1).join('/')
+
+    return {
+        recordType: 'drive_file',
+        path: relativePath,
+        name,
+        parentPath,
+        mime_type: inferMimeType(name),
+        size: data.byteLength,
+        bytes: new Uint8Array(data).buffer as ArrayBuffer,
+    }
 }
