@@ -11,6 +11,7 @@ const manifest = {
         },
     ],
     repository: { url: 'https://github.com/tinycld/google-takeout-import' },
+    peerVersions: { '@tinycld/core': '>=0.0.4 <0.1.0' },
 }
 
 export default manifest
