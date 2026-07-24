@@ -1,7 +1,6 @@
+import { useAuth } from '@tinycld/core/lib/auth'
 import { usePackages } from '@tinycld/core/lib/packages/use-packages'
 import { useThemeColor } from '@tinycld/core/lib/use-app-theme'
-import { useCurrentRole } from '@tinycld/core/lib/use-current-role'
-import { useOrgInfo } from '@tinycld/core/lib/use-org-info'
 import { Switch } from '@tinycld/core/ui/switch'
 import {
     AlertTriangle,
@@ -28,15 +27,13 @@ const SERVICE_META: Record<ImportService, { label: string; Icon: typeof Users }>
 }
 
 export function GoogleTakeoutImportSection() {
-    const { orgId } = useOrgInfo()
-    const { userOrgId } = useCurrentRole()
+    const userId = useAuth().user.id
     const { mailboxId, loading: mailboxLoading } = useDefaultMailbox()
     const packages = usePackages()
     const installedSlugs = new Set(packages.map(p => p.slug))
 
     const { selectFiles, startImport, requestCancel, store } = useTakeoutImport({
-        orgId,
-        userOrgId,
+        userId,
         mailboxId,
     })
 

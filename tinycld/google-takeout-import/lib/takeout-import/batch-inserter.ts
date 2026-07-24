@@ -39,7 +39,7 @@ export function createBatchInserter({
     onException,
 }: BatchInserterOptions) {
     const isCancelled = () => cancelSignal?.() === true
-    const { orgId, userOrgId, mailboxId } = context
+    const { userId, mailboxId } = context
 
     const folderIdMap = new Map<string, string>()
     const calendarIdMap = new Map<string, string>()
@@ -94,7 +94,7 @@ export function createBatchInserter({
                 await pb.collection('contacts').getFirstListItem(
                     pb.filter('email = {:email} && owner = {:owner}', {
                         email: contact.email,
-                        owner: userOrgId,
+                        owner: userId,
                     })
                 )
                 onProgress('contact', { skipped: 1, imported: -1 })
@@ -108,7 +108,7 @@ export function createBatchInserter({
                     pb.filter('first_name = {:first} && last_name = {:last} && owner = {:owner}', {
                         first: contact.first_name,
                         last: contact.last_name,
-                        owner: userOrgId,
+                        owner: userId,
                     })
                 )
                 onProgress('contact', { skipped: 1, imported: -1 })
@@ -130,7 +130,7 @@ export function createBatchInserter({
                 notes: contact.notes,
                 vcard_uid: contact.vcard_uid || crypto.randomUUID(),
                 favorite: false,
-                owner: userOrgId,
+                owner: userId,
             })
         )
     }
@@ -138,13 +138,11 @@ export function createBatchInserter({
     async function insertCalendar(cal: ParsedCalendar) {
         const calName = cal.name || 'Imported Calendar'
 
-        // Reuse an existing calendar with the same name in this org.
+        // Reuse an existing calendar with the same name.
         try {
             const existing = await pb
                 .collection('calendar_calendars')
-                .getFirstListItem(
-                    pb.filter('name = {:name} && org = {:org}', { name: calName, org: orgId })
-                )
+                .getFirstListItem(pb.filter('name = {:name}', { name: calName }))
             calendarIdMap.set(cal.name, existing.id)
             onProgress('calendar', { skipped: 1, imported: -1 })
             return
@@ -156,7 +154,6 @@ export function createBatchInserter({
         await withRetry(() =>
             pb.collection('calendar_calendars').create({
                 id: calId,
-                org: orgId,
                 name: calName,
                 color: 'blue',
             })
@@ -197,7 +194,7 @@ export function createBatchInserter({
             pb.collection('calendar_events').create({
                 id: newRecordId(),
                 calendar: calendarId,
-                created_by: userOrgId,
+                created_by: userId,
                 title: event.title || '(No title)',
                 description: event.description,
                 location: event.location,
@@ -217,9 +214,8 @@ export function createBatchInserter({
     async function isDriveDupe(name: string, parentId: string): Promise<boolean> {
         try {
             await pb.collection('drive_items').getFirstListItem(
-                pb.filter('name = {:name} && org = {:org} && parent = {:parent}', {
+                pb.filter('name = {:name} && parent = {:parent}', {
                     name,
-                    org: orgId,
                     parent: parentId,
                 })
             )
@@ -238,14 +234,10 @@ export function createBatchInserter({
         // Check for existing folder — reuse its ID for child resolution
         try {
             const existing = await pb.collection('drive_items').getFirstListItem(
-                pb.filter(
-                    'name = {:name} && org = {:org} && parent = {:parent} && is_folder = true',
-                    {
-                        name: folder.name,
-                        org: orgId,
-                        parent: parentId,
-                    }
-                )
+                pb.filter('name = {:name} && parent = {:parent} && is_folder = true', {
+                    name: folder.name,
+                    parent: parentId,
+                })
             )
             folderIdMap.set(folder.path, existing.id)
             onProgress('drive_folder', { skipped: 1, imported: -1 })
@@ -257,12 +249,11 @@ export function createBatchInserter({
         const folderId = newRecordId()
         const formData = new FormData()
         formData.append('id', folderId)
-        formData.append('org', orgId)
         formData.append('name', folder.name)
         formData.append('is_folder', 'true')
         formData.append('mime_type', '')
         formData.append('parent', parentId)
-        formData.append('created_by', userOrgId)
+        formData.append('created_by', userId)
         formData.append('size', '0')
         formData.append('description', '')
 
@@ -273,9 +264,9 @@ export function createBatchInserter({
             pb.collection('drive_shares').create({
                 id: newRecordId(),
                 item: folderId,
-                user_org: userOrgId,
+                user_org: userId,
                 role: 'owner',
-                created_by: userOrgId,
+                created_by: userId,
             })
         )
     }
@@ -294,12 +285,11 @@ export function createBatchInserter({
 
         const formData = new FormData()
         formData.append('id', itemId)
-        formData.append('org', orgId)
         formData.append('name', file.name)
         formData.append('is_folder', 'false')
         formData.append('mime_type', file.mime_type || 'application/octet-stream')
         formData.append('parent', parentId)
-        formData.append('created_by', userOrgId)
+        formData.append('created_by', userId)
         formData.append('size', String(file.size))
         formData.append('file', fileObj)
         formData.append('description', '')
@@ -310,9 +300,9 @@ export function createBatchInserter({
             pb.collection('drive_shares').create({
                 id: newRecordId(),
                 item: itemId,
-                user_org: userOrgId,
+                user_org: userId,
                 role: 'owner',
-                created_by: userOrgId,
+                created_by: userId,
             })
         )
     }
@@ -325,7 +315,7 @@ export function createBatchInserter({
             const existing = await pb.collection('labels').getFirstListItem(
                 pb.filter('name = {:name} && user_org = {:uorg}', {
                     name,
-                    uorg: userOrgId,
+                    uorg: userId,
                 })
             )
             labelIdMap.set(name, existing.id)
@@ -338,8 +328,7 @@ export function createBatchInserter({
         await withRetry(() =>
             pb.collection('labels').create({
                 id: labelId,
-                org: orgId,
-                user_org: userOrgId,
+                user_org: userId,
                 name,
                 color: '#3949ab',
             })
@@ -396,7 +385,7 @@ export function createBatchInserter({
         const threadState = await withRetry(() =>
             pb.collection('mail_thread_state').create({
                 thread: threadRecord.id,
-                user_org: userOrgId,
+                user_org: userId,
                 folder: thread.folder,
                 is_read: thread.is_read,
                 is_starred: thread.is_starred,
@@ -410,7 +399,7 @@ export function createBatchInserter({
                     label: labelId,
                     record_id: threadState.id,
                     collection: 'mail_thread_state',
-                    user_org: userOrgId,
+                    user_org: userId,
                 })
             )
         }

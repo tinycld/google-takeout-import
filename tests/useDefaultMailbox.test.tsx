@@ -13,14 +13,14 @@ vi.mock('@tinycld/core/lib/pocketbase', () => ({
     },
 }))
 
-let mockUserOrgId = 'uo1'
-vi.mock('@tinycld/core/lib/use-current-role', () => ({
-    useCurrentRole: () => ({ userOrgId: mockUserOrgId }),
+let mockUserId = 'u1'
+vi.mock('@tinycld/core/lib/auth', () => ({
+    useAuth: () => ({ user: mockUserId ? { id: mockUserId } : null }),
 }))
 
 beforeEach(() => {
     getList.mockReset()
-    mockUserOrgId = 'uo1'
+    mockUserId = 'u1'
 })
 
 describe('useDefaultMailbox', () => {
@@ -38,7 +38,7 @@ describe('useDefaultMailbox', () => {
         expect(result.current.loading).toBe(true)
         expect(result.current.mailboxId).toBeNull()
 
-        resolveList({ items: [{ user_org: 'uo1', mailbox: 'mb-42' }] })
+        resolveList({ items: [{ user_org: 'u1', mailbox: 'mb-42' }] })
 
         await waitFor(() => {
             expect(result.current.loading).toBe(false)
@@ -57,8 +57,8 @@ describe('useDefaultMailbox', () => {
         expect(result.current.mailboxId).toBeNull()
     })
 
-    it('is not loading when there is no user-org to look up', async () => {
-        mockUserOrgId = ''
+    it('is not loading when there is no user to look up', async () => {
+        mockUserId = ''
         const { result } = renderHook(() => useDefaultMailbox())
 
         expect(result.current.loading).toBe(false)

@@ -47,7 +47,7 @@ function zipFile(entries: Record<string, Uint8Array>): TakeoutFile & { reads: nu
     return file
 }
 
-const CONTEXT: ImportContext = { orgId: 'o1', userOrgId: 'uo1', mailboxId: 'mb1' }
+const CONTEXT: ImportContext = { userId: 'u1', mailboxId: 'mb1' }
 
 function collectingCallbacks(overrides: Partial<FallbackCallbacks> = {}) {
     const batches: Array<{ service: ImportService; records: ParsedRecord[] }> = []
