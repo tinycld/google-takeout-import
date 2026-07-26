@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { expect, test } from '@playwright/test'
-import { login, navigateToPackage, ORG_SLUG } from '../../../../tests/e2e/helpers'
+import { login, navigateToPackage } from '../../../../tests/e2e/helpers'
 
 const TAKEOUT_DIR = path.resolve(import.meta.dirname, './assets/takeout')
 const TAKEOUT_FILES = [
@@ -9,7 +9,8 @@ const TAKEOUT_FILES = [
     path.join(TAKEOUT_DIR, 'takeout-20260416T000738Z-7-001.zip'), // Mail
 ]
 
-const CAL_URL = `/a/${ORG_SLUG}/calendar`
+// Single-org: routes are bare, no /a/<org> prefix.
+const CAL_URL = '/calendar'
 
 // Restrict text-based assertions to the *visible* DOM so they don't
 // match elements in frozen sibling screens kept mounted by the package
@@ -28,7 +29,7 @@ test.describe('Google Takeout Import', () => {
     })
 
     test('run import and wait for completion', async ({ page }) => {
-        await page.goto(`/a/${ORG_SLUG}/settings/google-takeout-import/google-takeout`)
+        await page.goto('/settings/google-takeout-import/google-takeout')
         await expect(page.getByText('Import from Google').first()).toBeVisible({ timeout: 10_000 })
 
         // Upload files again (serial tests share login but not page state)

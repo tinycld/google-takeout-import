@@ -139,6 +139,13 @@ export function createBatchInserter({
         const calName = cal.name || 'Imported Calendar'
 
         // Reuse an existing calendar with the same name.
+        //
+        // Deliberately unscoped: the read is evaluated under the caller's
+        // credentials, so calendar_calendars' list rule already narrows it to
+        // calendars they're a member of. Safe while one deployment is one org —
+        // but if a router ever multiplexes several orgs over ONE PocketBase
+        // instance, this (and the ical_uid/message_id lookups below) would match
+        // across tenants. See multi-org/HANDOFF.md.
         try {
             const existing = await pb
                 .collection('calendar_calendars')
@@ -264,7 +271,7 @@ export function createBatchInserter({
             pb.collection('drive_shares').create({
                 id: newRecordId(),
                 item: folderId,
-                user_org: userId,
+                user: userId,
                 role: 'owner',
                 created_by: userId,
             })
@@ -300,7 +307,7 @@ export function createBatchInserter({
             pb.collection('drive_shares').create({
                 id: newRecordId(),
                 item: itemId,
-                user_org: userId,
+                user: userId,
                 role: 'owner',
                 created_by: userId,
             })
@@ -313,9 +320,9 @@ export function createBatchInserter({
 
         try {
             const existing = await pb.collection('labels').getFirstListItem(
-                pb.filter('name = {:name} && user_org = {:uorg}', {
+                pb.filter('name = {:name} && user = {:user}', {
                     name,
-                    uorg: userId,
+                    user: userId,
                 })
             )
             labelIdMap.set(name, existing.id)
@@ -328,7 +335,7 @@ export function createBatchInserter({
         await withRetry(() =>
             pb.collection('labels').create({
                 id: labelId,
-                user_org: userId,
+                user: userId,
                 name,
                 color: '#3949ab',
             })
@@ -385,7 +392,7 @@ export function createBatchInserter({
         const threadState = await withRetry(() =>
             pb.collection('mail_thread_state').create({
                 thread: threadRecord.id,
-                user_org: userId,
+                user: userId,
                 folder: thread.folder,
                 is_read: thread.is_read,
                 is_starred: thread.is_starred,
@@ -399,7 +406,7 @@ export function createBatchInserter({
                     label: labelId,
                     record_id: threadState.id,
                     collection: 'mail_thread_state',
-                    user_org: userId,
+                    user: userId,
                 })
             )
         }
