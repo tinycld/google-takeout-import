@@ -1,6 +1,6 @@
 import path from 'node:path'
-import { expect, test } from '@playwright/test'
-import { login, navigateToPackage } from '../../../../tests/e2e/helpers'
+import { expect, type Page, test } from '@playwright/test'
+import { login, navigateToPackage } from '@tinycld/core/e2e-helpers'
 
 const TAKEOUT_DIR = path.resolve(import.meta.dirname, './assets/takeout')
 const TAKEOUT_FILES = [
@@ -9,16 +9,50 @@ const TAKEOUT_FILES = [
     path.join(TAKEOUT_DIR, 'takeout-20260416T000738Z-7-001.zip'), // Mail
 ]
 
-// Single-org: routes are bare, no /a/<org> prefix.
-const CAL_URL = '/calendar'
+// The one deliberately long budget in this file: the import itself parses
+// three zips client-side and inserts hundreds of records through PocketBase,
+// which legitimately takes minutes on a loaded CI runner. Everything else
+// uses Playwright's default expect timeout.
+const IMPORT_COMPLETE_TIMEOUT = 120_000
+
+// Calendar month contents hydrate through live queries after navigation, which
+// under CI load can outrun the default 5s. One named budget instead of
+// scattered inline bumps.
+const EVENT_LOAD_TIMEOUT = 10_000
 
 // Restrict text-based assertions to the *visible* DOM so they don't
 // match elements in frozen sibling screens kept mounted by the package
 // FrozenSlideStack layouts (contacts, drive, mail). `.filter({ visible: true })`
 // is the locator-level equivalent of the `:visible` CSS pseudo-class
 // and cooperates with `.first()`.
-function visibleText(page: import('@playwright/test').Page, text: string | RegExp) {
+function visibleText(page: Page, text: string | RegExp) {
     return page.getByText(text).filter({ visible: true })
+}
+
+// The event-detail popover, by its component testID — the old
+// [style*="width: 360"] selector broke on any styling change and could match
+// unrelated fixed-width elements.
+function eventPopover(page: Page) {
+    return page.getByTestId('event-detail-popover')
+}
+
+// Open the calendar's Month view on a target month, entirely in-app — a
+// page.goto('?view=month&date=…') is a hard nav that tears down the SPA and
+// cancels in-flight chunk loads (see helpers.ts). Steps the header arrows
+// toward the target, bounded so a UI regression fails fast instead of looping.
+async function openMonth(page: Page, target: string) {
+    await navigateToPackage(page, 'calendar')
+    await page.getByRole('button', { name: 'Month' }).click()
+    const label = page.getByTestId('calendar-date-label')
+    // Wait until the label is in month format ("April 2026") before parsing.
+    await expect(label).toHaveText(/^[A-Z][a-z]+ \d{4}$/)
+    for (let i = 0; i < 36; i++) {
+        const current = (await label.textContent())?.trim() ?? ''
+        if (current === target) return
+        const dir = new Date(`1 ${current}`) > new Date(`1 ${target}`) ? 'Previous' : 'Next'
+        await page.getByRole('button', { name: dir, exact: true }).click()
+    }
+    throw new Error(`calendar never reached ${target}`)
 }
 
 test.describe.configure({ mode: 'serial' })
@@ -29,8 +63,11 @@ test.describe('Google Takeout Import', () => {
     })
 
     test('run import and wait for completion', async ({ page }) => {
-        await page.goto('/settings/google-takeout-import/google-takeout')
-        await expect(page.getByText('Import from Google').first()).toBeVisible({ timeout: 10_000 })
+        // In-app: Settings → the package's "Import from Google" entry.
+        await navigateToPackage(page, 'settings')
+        await page.getByText('Import from Google', { exact: true }).first().click()
+        await page.waitForURL(/google-takeout/)
+        await expect(page.getByText('Import from Google').first()).toBeVisible()
 
         // Upload files again (serial tests share login but not page state)
         const fileChooserPromise = page.waitForEvent('filechooser')
@@ -38,11 +75,15 @@ test.describe('Google Takeout Import', () => {
         const fileChooser = await fileChooserPromise
         await fileChooser.setFiles(TAKEOUT_FILES)
 
-        await expect(page.getByText('Start Import')).toBeVisible({ timeout: 30_000 })
+        // Detection reads all three zips in the browser before enabling the
+        // button — slow on CI, so it shares the import budget.
+        await expect(page.getByText('Start Import')).toBeVisible({
+            timeout: IMPORT_COMPLETE_TIMEOUT,
+        })
         await page.getByText('Start Import').click()
 
         await expect(page.getByText('Import Complete', { exact: true })).toBeVisible({
-            timeout: 120_000,
+            timeout: IMPORT_COMPLETE_TIMEOUT,
         })
         await expect(page.getByText(/records imported/)).toBeVisible()
     })
@@ -50,8 +91,10 @@ test.describe('Google Takeout Import', () => {
     test('verify contacts were imported', async ({ page }) => {
         await navigateToPackage(page, 'contacts')
 
-        await expect(visibleText(page, 'Bob McGee').first()).toBeVisible({ timeout: 10_000 })
-        await expect(visibleText(page, 'Nathan Stitt').first()).toBeVisible({ timeout: 10_000 })
+        await expect(visibleText(page, 'Bob McGee').first()).toBeVisible({
+            timeout: EVENT_LOAD_TIMEOUT,
+        })
+        await expect(visibleText(page, 'Nathan Stitt').first()).toBeVisible()
 
         // Click into Bob's detail page to check that grouped vCard properties
         // (item1.EMAIL ↔ item1.X-ABLabel) were merged correctly. The contacts
@@ -61,73 +104,72 @@ test.describe('Google Takeout Import', () => {
         // would otherwise also match the (now-hidden) list-row preview.
         await visibleText(page, 'Bob McGee').first().click()
         await page.waitForURL(/\/contacts\//)
-        await expect(visibleText(page, 'bobby@bob.com').first()).toBeVisible({ timeout: 10_000 })
+        await expect(visibleText(page, 'bobby@bob.com').first()).toBeVisible()
     })
 
     test('verify calendar events match takeout data', async ({ page }) => {
-        // Navigate to the week containing Apr 13 (Test Entry #3 with guests)
-        await page.goto(`${CAL_URL}?view=week&date=2026-04-13`)
-        await expect(page.getByText('April 2026').first()).toBeVisible({ timeout: 10_000 })
+        // Everything asserted here lands in April 2026.
+        await openMonth(page, 'April 2026')
 
         // The imported calendar should appear in the sidebar
         await expect(page.getByText('testermctesty@argosity.com').first()).toBeVisible({
-            timeout: 10_000,
+            timeout: EVENT_LOAD_TIMEOUT,
         })
 
-        // --- Test Entry #3: all-day Apr 13 (Monday) ---
-        await expect(page.getByText('Test Entry #3')).toBeVisible({ timeout: 10_000 })
+        // --- Test Entry #3: all-day Apr 13 (Monday), with guests ---
+        // Month view renders an event chip once per grid segment, so match the
+        // first visible chip rather than expecting a single node.
+        await expect(visibleText(page, 'Test Entry #3').first()).toBeVisible({
+            timeout: EVENT_LOAD_TIMEOUT,
+        })
 
-        await page.getByText('Test Entry #3').click()
-        const popover = page.locator('[style*="width: 360"]')
-        await expect(popover.getByText('Test Entry #3')).toBeVisible({ timeout: 5_000 })
-        await expect(popover.getByText('Monday, April 13')).toBeVisible()
-        await expect(popover.getByText('2 guests')).toBeVisible()
-        await expect(popover.getByText('testermctesty@argosity.com')).toBeVisible()
+        await visibleText(page, 'Test Entry #3').first().click()
+        await expect(eventPopover(page).getByText('Test Entry #3')).toBeVisible()
+        await expect(eventPopover(page).getByText('Monday, April 13')).toBeVisible()
+        await expect(eventPopover(page).getByText('2 guests')).toBeVisible()
+        await expect(eventPopover(page).getByText('testermctesty@argosity.com')).toBeVisible()
         await page.mouse.click(200, 200)
 
         // --- "30 min with tester": recurring timed events from appointment schedule ---
-        await expect(page.getByText('30 min with tester').first()).toBeVisible({ timeout: 10_000 })
+        await expect(visibleText(page, '30 min with tester').first()).toBeVisible()
 
         // --- Test Entry #1: all-day Apr 6 (Monday) ---
-        await page.goto(`${CAL_URL}?view=month&date=2026-04-01`)
-        await expect(page.getByText('Test Entry #1')).toBeVisible({ timeout: 10_000 })
+        await expect(visibleText(page, 'Test Entry #1').first()).toBeVisible()
 
-        await page.getByText('Test Entry #1').click()
-        const popover1 = page.locator('[style*="width: 360"]')
-        await expect(popover1.getByText('Test Entry #1')).toBeVisible({ timeout: 5_000 })
-        await expect(popover1.getByText('Monday, April 6')).toBeVisible()
-        await expect(popover1.getByText(/guest/)).not.toBeVisible()
+        await visibleText(page, 'Test Entry #1').first().click()
+        await expect(eventPopover(page).getByText('Test Entry #1')).toBeVisible()
+        await expect(eventPopover(page).getByText('Monday, April 6')).toBeVisible()
+        await expect(eventPopover(page).getByText(/guest/)).not.toBeVisible()
         await page.mouse.click(200, 200)
 
         // --- Test Entry #2: all-day Apr 24 (Friday) ---
-        await expect(page.getByText('Test Entry #2')).toBeVisible({ timeout: 10_000 })
+        await expect(visibleText(page, 'Test Entry #2').first()).toBeVisible()
 
-        await page.getByText('Test Entry #2').click()
-        const popover2 = page.locator('[style*="width: 360"]')
-        await expect(popover2.getByText('Test Entry #2')).toBeVisible({ timeout: 5_000 })
-        await expect(popover2.getByText('Friday, April 24')).toBeVisible()
-        await expect(popover2.getByText(/guest/)).not.toBeVisible()
+        await visibleText(page, 'Test Entry #2').first().click()
+        await expect(eventPopover(page).getByText('Test Entry #2')).toBeVisible()
+        await expect(eventPopover(page).getByText('Friday, April 24')).toBeVisible()
+        await expect(eventPopover(page).getByText(/guest/)).not.toBeVisible()
         await page.mouse.click(200, 200)
     })
 
     test('verify recurring event imported and displayed', async ({ page }) => {
-        await page.goto(`${CAL_URL}?view=month&date=2026-05-01`)
-        await expect(page.getByText('May 2026').first()).toBeVisible({ timeout: 10_000 })
+        await openMonth(page, 'May 2026')
+        await expect(visibleText(page, 'Test Reoccur #1').first()).toBeVisible({
+            timeout: EVENT_LOAD_TIMEOUT,
+        })
 
-        await expect(page.getByText('Test Reoccur #1').first()).toBeVisible({ timeout: 10_000 })
-
-        await page.getByText('Test Reoccur #1').first().click()
-        const popover = page.locator('[style*="width: 360"]')
-        await expect(popover.getByText('Test Reoccur #1')).toBeVisible({ timeout: 5_000 })
-        await expect(popover.getByText('Friday, May 1')).toBeVisible()
+        await visibleText(page, 'Test Reoccur #1').first().click()
+        await expect(eventPopover(page).getByText('Test Reoccur #1')).toBeVisible()
+        await expect(eventPopover(page).getByText('Friday, May 1')).toBeVisible()
         // FREQ=MONTHLY;COUNT=12;BYMONTHDAY=1 → "Monthly on day 1, 12 times"
-        await expect(popover.getByText('Monthly on day 1, 12 times')).toBeVisible()
-        await expect(popover.getByText(/guest/)).not.toBeVisible()
+        await expect(eventPopover(page).getByText('Monthly on day 1, 12 times')).toBeVisible()
+        await expect(eventPopover(page).getByText(/guest/)).not.toBeVisible()
         await page.mouse.click(200, 200)
 
-        await page.goto(`${CAL_URL}?view=month&date=2026-06-01`)
-        await expect(page.getByText('June 2026').first()).toBeVisible({ timeout: 10_000 })
-        await expect(page.getByText('Test Reoccur #1').first()).toBeVisible({ timeout: 10_000 })
+        await openMonth(page, 'June 2026')
+        await expect(visibleText(page, 'Test Reoccur #1').first()).toBeVisible({
+            timeout: EVENT_LOAD_TIMEOUT,
+        })
     })
 
     test('verify drive files were imported', async ({ page }) => {
@@ -141,14 +183,17 @@ test.describe('Google Takeout Import', () => {
         // accumulated. The drive search input narrows the list to a
         // single row server-side, sidestepping the need to walk the
         // FlashList container at all.
+        // Rows are labelled clickable regions, not <button>s (they contain
+        // their own action buttons) — match on aria-label like drive's own
+        // driveItem helper does.
         const search = page.getByPlaceholder('Search in Files')
         for (const name of ['sample.docx', 'sample.pdf', 'sample.pptx', 'Folder #1']) {
             await search.fill(name)
             const row = page
-                .getByRole('button', { name: new RegExp(`^${escapeRegex(name)} `) })
+                .getByLabel(new RegExp(`^${escapeRegex(name)} `))
                 .filter({ visible: true })
                 .first()
-            await expect(row).toBeVisible({ timeout: 10_000 })
+            await expect(row).toBeVisible({ timeout: EVENT_LOAD_TIMEOUT })
         }
         await search.clear()
     })
@@ -164,7 +209,7 @@ test.describe('Google Takeout Import', () => {
                 .locator('[data-testid="email-row"]:visible')
                 .filter({ hasText: 'Test email #2' })
                 .first()
-        ).toBeVisible({ timeout: 10_000 })
+        ).toBeVisible({ timeout: EVENT_LOAD_TIMEOUT })
     })
 })
 
