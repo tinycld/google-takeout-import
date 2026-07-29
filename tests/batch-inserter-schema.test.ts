@@ -39,10 +39,12 @@ function recordingPb(): { pb: PocketBase; recorded: Recorded } {
     }
 
     const collection = (name: string) => ({
-        // Always "not found" so every dedup lookup proceeds to create.
+        // Always "not found" so every dedup lookup proceeds to create. Shaped
+        // like the SDK's ClientResponseError: only a status-404 rejection may
+        // mean "not found" — anything else must abort the row (R3).
         getFirstListItem: (filter: string) => {
             noteFilter(name, filter)
-            return Promise.reject(new Error('not found'))
+            return Promise.reject(Object.assign(new Error('not found'), { status: 404 }))
         },
         getList: (_page: number, _per: number, opts: { filter: string }) => {
             noteFilter(name, opts.filter)

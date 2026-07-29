@@ -23,6 +23,14 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
     }
 }
 
+// Dedup lookups may treat ONLY a 404 as "not found — create it". Any other
+// failure (network drop, auth expiry, 500) must propagate: swallowing it here
+// answered "does this record exist?" with "no" on a transient error, and the
+// import then minted a duplicate (P2-11/R3).
+function isNotFound(err: unknown): boolean {
+    return (err as { status?: number } | null)?.status === 404
+}
+
 export interface BatchInserterOptions {
     pb: PocketBase
     context: ImportContext
@@ -86,7 +94,8 @@ export function createBatchInserter({
                     .getFirstListItem(pb.filter('vcard_uid = {:uid}', { uid: contact.vcard_uid }))
                 onProgress('contact', { skipped: 1, imported: -1 })
                 return
-            } catch {
+            } catch (err) {
+                if (!isNotFound(err)) throw err
                 // Not found — proceed to create
             }
         } else if (contact.email) {
@@ -99,7 +108,8 @@ export function createBatchInserter({
                 )
                 onProgress('contact', { skipped: 1, imported: -1 })
                 return
-            } catch {
+            } catch (err) {
+                if (!isNotFound(err)) throw err
                 // Not found — proceed to create
             }
         } else if (contact.first_name && contact.last_name) {
@@ -113,7 +123,8 @@ export function createBatchInserter({
                 )
                 onProgress('contact', { skipped: 1, imported: -1 })
                 return
-            } catch {
+            } catch (err) {
+                if (!isNotFound(err)) throw err
                 // Not found — proceed to create
             }
         }
@@ -153,7 +164,8 @@ export function createBatchInserter({
             calendarIdMap.set(cal.name, existing.id)
             onProgress('calendar', { skipped: 1, imported: -1 })
             return
-        } catch {
+        } catch (err) {
+            if (!isNotFound(err)) throw err
             // Not found — create
         }
 
@@ -192,7 +204,8 @@ export function createBatchInserter({
                     .getFirstListItem(pb.filter('ical_uid = {:uid}', { uid: event.ical_uid }))
                 onProgress('calendar_event', { skipped: 1, imported: -1 })
                 return
-            } catch {
+            } catch (err) {
+                if (!isNotFound(err)) throw err
                 // Not found — proceed to create
             }
         }
@@ -227,7 +240,8 @@ export function createBatchInserter({
                 })
             )
             return true
-        } catch {
+        } catch (err) {
+            if (!isNotFound(err)) throw err
             return false
         }
     }
@@ -249,7 +263,8 @@ export function createBatchInserter({
             folderIdMap.set(folder.path, existing.id)
             onProgress('drive_folder', { skipped: 1, imported: -1 })
             return
-        } catch {
+        } catch (err) {
+            if (!isNotFound(err)) throw err
             // Not found — create
         }
 
@@ -327,7 +342,8 @@ export function createBatchInserter({
             )
             labelIdMap.set(name, existing.id)
             return existing.id
-        } catch {
+        } catch (err) {
+            if (!isNotFound(err)) throw err
             // Not found — create
         }
 
@@ -357,7 +373,8 @@ export function createBatchInserter({
                     )
                 onProgress('mail_thread', { skipped: 1, imported: -1 })
                 return
-            } catch {
+            } catch (err) {
+                if (!isNotFound(err)) throw err
                 // Not found — proceed
             }
         }
