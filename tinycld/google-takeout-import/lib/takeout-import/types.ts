@@ -36,8 +36,7 @@ export interface TakeoutDetection {
 }
 
 export interface ImportContext {
-    orgId: string
-    userOrgId: string
+    userId: string
     mailboxId: string | null
 }
 

@@ -76,12 +76,18 @@ export function useTakeoutImport(context: ImportContext) {
             DocumentPicker.getDocumentAsync({
                 multiple: true,
                 type: ['application/zip'],
-            }).then(result => {
-                if (result.canceled) return
-                const files = result.assets.map(nativeTakeoutFile)
-                selectedFiles = files
-                detect(files)
             })
+                .then(result => {
+                    if (result.canceled) return
+                    const files = result.assets.map(nativeTakeoutFile)
+                    selectedFiles = files
+                    detect(files)
+                })
+                .catch(err => {
+                    // A picker rejection was an unhandled promise rejection
+                    // (P2-11/R3). The user sees no file chosen; record why.
+                    captureException('takeout-pick', err)
+                })
         }
     }, [detect])
 

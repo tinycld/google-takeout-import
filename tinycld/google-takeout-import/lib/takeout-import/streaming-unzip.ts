@@ -1,4 +1,4 @@
-import { Unzip, UnzipInflate, unzip } from 'fflate'
+import { unzip } from 'fflate'
 import type { TakeoutFile } from './types'
 
 /**
@@ -76,78 +76,49 @@ export async function streamZipEntries(
     }
 }
 
-function concatChunks(chunks: Uint8Array[], total: number): Uint8Array {
-    const out = new Uint8Array(total)
-    let offset = 0
-    for (const chunk of chunks) {
-        out.set(chunk, offset)
-        offset += chunk.length
-    }
-    return out
-}
-
-function streamOneZip(
+// Decompress one entry at a time via the CENTRAL DIRECTORY, not fflate's
+// streaming `Unzip`. Google Takeout writes data-descriptor entries (bit 3: the
+// local header carries no sizes), which forces a streaming reader to scan the
+// byte stream for the next header signature — and a Drive export contains
+// docx/pptx/xlsx payloads that are themselves zips. Deflate stores their
+// already-compressed bytes in STORED blocks, i.e. verbatim, so the INNER
+// archives' "PK\x03\x04" headers appear literally inside the outer entry's
+// compressed stream. fflate's scanner misparsed those as new outer entries:
+// it fabricated phantom entries and failed with "unexpected EOF" / "invalid
+// distance" on the real takeout fixture. The central directory at the end of
+// the file has authoritative offsets and sizes, so enumerating from it is
+// immune — and inflating one filtered entry per `unzip` call keeps the
+// bounded-memory property this module exists for.
+async function streamOneZip(
     zipBytes: Uint8Array,
     onEntry: (path: string, bytes: Uint8Array) => void | Promise<void>
 ): Promise<void> {
-    return new Promise((resolve, reject) => {
-        // Entries complete in order; each completed entry is queued and drained
-        // sequentially so `onEntry` back-pressures reading of the next payload.
-        const queue: Array<{ path: string; bytes: Uint8Array }> = []
-        let draining = false
-        let finished = false
-        let failed = false
-
-        const drain = async () => {
-            if (draining) return
-            draining = true
-            try {
-                while (queue.length > 0) {
-                    const next = queue.shift()
-                    if (!next) break
-                    await onEntry(next.path, next.bytes)
-                }
-            } catch (err) {
-                failed = true
-                reject(err instanceof Error ? err : new Error(String(err)))
-                return
-            } finally {
-                draining = false
-            }
-            if (finished && queue.length === 0) resolve()
-        }
-
-        const unz = new Unzip(entry => {
-            const chunks: Uint8Array[] = []
-            let size = 0
-            entry.ondata = (err, chunk, final) => {
-                if (failed) return
-                if (err) {
-                    failed = true
-                    reject(err)
-                    return
-                }
-                chunks.push(chunk)
-                size += chunk.length
-                if (final) {
-                    queue.push({ path: entry.name, bytes: concatChunks(chunks, size) })
-                    void drain()
-                }
-            }
-            entry.start()
-        })
-        unz.register(UnzipInflate)
-
-        try {
-            unz.push(zipBytes, true)
-        } catch (err) {
-            failed = true
-            reject(err instanceof Error ? err : new Error(String(err)))
-            return
-        }
-
-        finished = true
-        // If nothing was queued (empty zip) or draining already flushed, resolve.
-        if (queue.length === 0 && !draining) resolve()
+    // Enumerate names in central-directory order without decompressing.
+    const names: string[] = []
+    await new Promise<void>((resolve, reject) => {
+        unzip(
+            zipBytes,
+            {
+                filter: info => {
+                    names.push(info.name)
+                    return false
+                },
+            },
+            err => (err ? reject(err) : resolve())
+        )
     })
+
+    for (let target = 0; target < names.length; target++) {
+        // Match by position, not name — zip files may carry duplicate names,
+        // and the filter is invoked in the same central-directory order the
+        // enumeration pass saw.
+        let index = 0
+        const single = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
+            unzip(zipBytes, { filter: () => index++ === target }, (err, result) =>
+                err ? reject(err) : resolve(result)
+            )
+        })
+        const bytes = single[names[target]]
+        if (bytes) await onEntry(names[target], bytes)
+    }
 }
