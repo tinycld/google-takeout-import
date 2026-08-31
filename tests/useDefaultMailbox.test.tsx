@@ -54,7 +54,7 @@ describe('useDefaultMailbox', () => {
     // type, so a rename in mail's migration is invisible to the compiler here.
     // pb is mocked, which means the filter is never checked against a real
     // collection either — so assert the field name explicitly. Without this the
-    // suite passed for the whole multi-org→single-org migration while the hook
+    // suite passed for the whole hosting→single-org migration while the hook
     // filtered on `user_org`, a column that no longer exists: PB 400s, the
     // .catch swallows it, and the UI shows a benign "no mailbox" warning.
     it('filters mail_mailbox_members on the `user` field', async () => {

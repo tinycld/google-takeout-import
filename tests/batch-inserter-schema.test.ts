@@ -296,7 +296,7 @@ describe('batch inserter mirrored-schema contract', () => {
         }
     })
 
-    it('carries no residue of the deleted multi-org schema anywhere', async () => {
+    it('carries no residue of the deleted hosting schema anywhere', async () => {
         const recorded = await runFullImport()
         const everything = [
             ...[...recorded.filters.values()].flatMap(s => [...s]),
