@@ -1,3 +1,4 @@
+import { HelpIcon } from '@tinycld/core/components/help/HelpIcon'
 import { useAuth } from '@tinycld/core/lib/auth'
 import { usePackages } from '@tinycld/core/lib/packages/use-packages'
 import { useThemeColor } from '@tinycld/core/lib/use-app-theme'
@@ -67,9 +68,12 @@ export function GoogleTakeoutImportSection() {
 
     return (
         <View className="gap-3">
-            <Text className="text-foreground" style={{ fontSize: 20, fontWeight: 'bold' }}>
-                Import from Google
-            </Text>
+            <View className="flex-row items-center gap-2">
+                <Text className="text-foreground" style={{ fontSize: 20, fontWeight: 'bold' }}>
+                    Import from Google
+                </Text>
+                <HelpIcon topic="google-takeout-import:importing-from-google" size={18} />
+            </View>
             <Text className="text-muted-foreground" style={{ fontSize: 13 }}>
                 Import your data from Google Takeout. Select one or more .zip files exported from
                 Google Takeout.
