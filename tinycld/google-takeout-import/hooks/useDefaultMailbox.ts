@@ -30,7 +30,7 @@ export function useDefaultMailbox(): DefaultMailbox {
         let cancelled = false
         setLoading(true)
         pb.collection('mail_mailbox_members')
-            // biome-ignore lint/plugin/pbtsdb-no-raw-pb-access: cross-package read of mail's mail_mailbox_members without a hard @tinycld/mail dependency (the collection is absent when mail isn't installed), so useStore/useOrgLiveQuery can't be used here.
+            // biome-ignore lint/plugin/pbtsdb-no-raw-pb-access: cross-package read of mail's mail_mailbox_members without a hard @tinycld/mail dependency (the collection is absent when mail isn't installed), so useStore/useMyLiveQuery can't be used here.
             .getList<MailMailboxMember>(1, 1, {
                 filter: pb.filter('user = {:user}', { user: userId }),
             })
