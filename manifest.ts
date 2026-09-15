@@ -1,7 +1,7 @@
 const manifest = {
     name: 'Google Takeout Import',
     slug: 'google-takeout-import',
-    version: '0.1.2',
+    version: '0.2.0',
     description: 'Import data from Google Takeout .zip files.',
     settings: [
         {
