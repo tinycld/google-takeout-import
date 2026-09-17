@@ -28,7 +28,7 @@ This is a **settings-only package**. The manifest declares no routes, nav entry,
 const manifest = {
     name: 'Google Takeout Import',
     slug: 'google-takeout-import',
-    version: '0.1.2',
+    version: '…',  // see package.json — the single source of truth
     description: 'Import data from Google Takeout .zip files.',
     settings: [
         { slug: 'google-takeout', component: 'settings/takeout', label: 'Import from Google' },
@@ -120,7 +120,7 @@ Dedup lookups treat **only a 404 as "not found — create it"**. Any other failu
 | Event | `ical_uid` |
 | Drive folder | `name` + `parent` + `is_folder = true` — reused so children resolve into it |
 | Drive file | `name` + `parent` |
-| Mail thread | `message_id` of the thread's first message |
+| Mail thread | `message_id` of the thread's first message, looked up in `mail_messages` |
 | Label | `name` + `user` |
 
 The calendar-name, `ical_uid`, and `message_id` lookups are deliberately unscoped: they run under the caller's credentials, so each collection's list rule already narrows them to what the user can see. That holds while one deployment is one workspace on one PocketBase; if a router ever multiplexed several tenants over a single PocketBase instance these lookups would match across tenants (see the comment in `insertCalendar`).
@@ -159,7 +159,7 @@ tinycld/google-takeout-import/lib/takeout-import/parsers/
 manifest.ts                     settings entry, help directory, peerVersions
 help/                           in-app help topics (markdown + frontmatter)
 tinycld/google-takeout-import/
-    types.ts                    ImportService (re-exported shape)
+    types.ts                    ImportService, TakeoutFile, Parsed* (local declarations)
     settings/takeout.tsx        settings panel → GoogleTakeoutImportSection
     components/
         GoogleTakeoutImportSection.tsx   the six states: idle / detecting / detected / importing / complete / error
