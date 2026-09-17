@@ -159,7 +159,7 @@ tinycld/google-takeout-import/lib/takeout-import/parsers/
 manifest.ts                     settings entry, help directory, peerVersions
 help/                           in-app help topics (markdown + frontmatter)
 tinycld/google-takeout-import/
-    types.ts                    ImportService, TakeoutFile, Parsed* (local declarations)
+    types.ts                    ImportService (local declaration, not a re-export)
     settings/takeout.tsx        settings panel → GoogleTakeoutImportSection
     components/
         GoogleTakeoutImportSection.tsx   the six states: idle / detecting / detected / importing / complete / error
