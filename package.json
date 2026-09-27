@@ -10,6 +10,7 @@
         "./hooks/*": "./tinycld/google-takeout-import/hooks/*.ts",
         "./components/*": "./tinycld/google-takeout-import/components/*.tsx",
         "./settings/*": "./tinycld/google-takeout-import/settings/*.tsx",
+        "./setup/*": "./tinycld/google-takeout-import/setup/*.tsx",
         "./lib/*": "./tinycld/google-takeout-import/lib/*.ts"
     },
     "scripts": {
