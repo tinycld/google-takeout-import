@@ -17,14 +17,22 @@ import {
 import { useState } from 'react'
 import { ActivityIndicator, Pressable, Text, View } from 'react-native'
 import { useDefaultMailbox } from '../hooks/useDefaultMailbox'
+import { SERVICE_LABELS } from '../lib/service-labels'
 import { useTakeoutImport } from '../lib/takeout-import'
 import type { ImportProgress, ImportService } from '../lib/takeout-import/types'
 
+const SERVICE_ICONS: Record<ImportService, typeof Users> = {
+    contacts: Users,
+    calendar: Calendar,
+    drive: HardDrive,
+    mail: Mail,
+}
+
 const SERVICE_META: Record<ImportService, { label: string; Icon: typeof Users }> = {
-    contacts: { label: 'Contacts', Icon: Users },
-    calendar: { label: 'Calendar', Icon: Calendar },
-    drive: { label: 'Drive', Icon: HardDrive },
-    mail: { label: 'Mail', Icon: Mail },
+    contacts: { label: SERVICE_LABELS.contacts, Icon: SERVICE_ICONS.contacts },
+    calendar: { label: SERVICE_LABELS.calendar, Icon: SERVICE_ICONS.calendar },
+    drive: { label: SERVICE_LABELS.drive, Icon: SERVICE_ICONS.drive },
+    mail: { label: SERVICE_LABELS.mail, Icon: SERVICE_ICONS.mail },
 }
 
 export function GoogleTakeoutImportSection() {
