@@ -1,9 +1,12 @@
 import { captureException } from '@tinycld/core/lib/errors'
-import { useMutation } from '@tinycld/core/lib/mutations'
+import { log } from '@tinycld/core/lib/logger'
+import { performMutations, useMutation } from '@tinycld/core/lib/mutations'
+import { notificationsCollection } from '@tinycld/core/lib/pocketbase'
 import { useTakeoutImportStore } from '@tinycld/core/lib/stores/takeout-import-store'
 import * as DocumentPicker from 'expo-document-picker'
 import { useCallback, useRef } from 'react'
 import { Platform } from 'react-native'
+import { importFinishedNotice } from './import-notice'
 import * as runImportImpl from './run-import'
 import type { ImportContext, ImportService, TakeoutFile } from './types'
 
@@ -102,6 +105,21 @@ export function useTakeoutImport(context: ImportContext) {
                 store.setPhase('idle')
             } else {
                 store.setPhase('complete')
+
+                // A finished import is the signal onboarding waits on (Task 20's
+                // "Bring your mail" step). A notice failure must not turn an
+                // otherwise-successful import into an error state for the user.
+                try {
+                    await performMutations(function* () {
+                        yield notificationsCollection.insert(
+                            importFinishedNotice(contextRef.current.userId, services)
+                        )
+                    })
+                } catch (err) {
+                    log.warn('takeout-import.notice', 'failed to write import-finished notice', {
+                        err,
+                    })
+                }
             }
         },
         onError: err => {

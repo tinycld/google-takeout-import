@@ -10,9 +10,12 @@ const manifest = {
             label: 'Import from Google',
         },
     ],
+    setupSteps: [
+        { id: 'import', label: 'Bring your mail', module: 'setup/BringYourMailStep', order: 'a4' },
+    ],
     help: { directory: 'help' },
     repository: { url: 'https://github.com/tinycld/google-takeout-import' },
-    peerVersions: { '@tinycld/core': '>=0.5.1 <0.6.0' },
+    peerVersions: { '@tinycld/core': '>=0.5.3 <0.6.0' },
 }
 
 export default manifest

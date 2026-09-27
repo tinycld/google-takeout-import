@@ -17,11 +17,22 @@ describe('google-takeout-import manifest', () => {
         expect(panel?.label).toBe('Import from Google')
     })
 
-    it('is settings-only (no routes / nav / server)', () => {
+    it('has no routes / nav / server (settings + a setup step only)', () => {
         // The literal type doesn't include these fields at all; asserting
         // via `in` keeps the check runtime-only and TS-quiet.
         expect('routes' in manifest).toBe(false)
         expect('nav' in manifest).toBe(false)
         expect('server' in manifest).toBe(false)
+    })
+
+    it('contributes the Bring your mail setup step', () => {
+        expect(manifest.setupSteps).toEqual([
+            {
+                id: 'import',
+                label: 'Bring your mail',
+                module: 'setup/BringYourMailStep',
+                order: 'a4',
+            },
+        ])
     })
 })
