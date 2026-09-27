@@ -51,7 +51,8 @@ export function useIsStepVisible(): boolean | undefined {
     return isStepVisibleFromRole(isReady ? role : undefined)
 }
 
-// Done once Task 19's import-finished notification exists for this user.
+// Done once an import-finished notification exists for this user — the step
+// asks whether an import ever completed, not whether one is in progress now.
 export function isStepDoneFromRow(row: unknown, isLoading: boolean): boolean | undefined {
     if (isLoading) return undefined
     return row !== undefined

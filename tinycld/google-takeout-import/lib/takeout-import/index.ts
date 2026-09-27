@@ -106,10 +106,10 @@ export function useTakeoutImport(context: ImportContext) {
             } else {
                 store.setPhase('complete')
 
-                // A finished import is the signal onboarding waits on (Task 20's
-                // "Bring your mail" step). recordImportFinished never throws, so
-                // a notice failure can't turn an otherwise-successful import into
-                // an error state for the user.
+                // A finished import is the signal the "Bring your mail" setup
+                // step waits on. recordImportFinished never throws, so a notice
+                // failure can't turn an otherwise-successful import into an
+                // error state for the user.
                 await recordImportFinished(contextRef.current.userId, services, () =>
                     performMutations(function* () {
                         yield notificationsCollection.insert(
