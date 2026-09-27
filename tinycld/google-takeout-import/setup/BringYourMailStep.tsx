@@ -1,6 +1,5 @@
 import { eq } from '@tanstack/db'
 import { SetupContinueButton } from '@tinycld/core/components/setup/wizard/SetupContinueButton'
-import { usePackages } from '@tinycld/core/lib/packages/use-packages'
 import { useStore } from '@tinycld/core/lib/pocketbase'
 import type { SetupStepProps } from '@tinycld/core/lib/setup/types'
 import { useCurrentRole } from '@tinycld/core/lib/use-current-role'
@@ -8,6 +7,7 @@ import { useMyLiveQuery } from '@tinycld/core/lib/use-my-live-query'
 import { Button, ButtonText } from '@tinycld/core/ui/button'
 import { useRouter } from 'expo-router'
 import { Text, View } from 'react-native'
+import { useInstalledSlugs } from '../hooks/useInstalledSlugs'
 import { SERVICE_LABELS } from '../lib/service-labels'
 import {
     IMPORT_NOTICE_PACKAGE,
@@ -73,8 +73,7 @@ export function useIsStepDone(): boolean | undefined {
 
 export default function BringYourMailStep({ next }: SetupStepProps) {
     const router = useRouter()
-    const packages = usePackages()
-    const installedSlugs = new Set(packages.map(p => p.slug))
+    const installedSlugs = useInstalledSlugs()
     const openImportPanel = () => router.push(IMPORT_PANEL_HREF)
     return (
         <View className="max-w-[440px] gap-1">

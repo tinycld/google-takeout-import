@@ -1,6 +1,5 @@
 import { HelpIcon } from '@tinycld/core/components/help/HelpIcon'
 import { useAuth } from '@tinycld/core/lib/auth'
-import { usePackages } from '@tinycld/core/lib/packages/use-packages'
 import { useThemeColor } from '@tinycld/core/lib/use-app-theme'
 import { Switch } from '@tinycld/core/ui/switch'
 import {
@@ -17,6 +16,7 @@ import {
 import { useState } from 'react'
 import { ActivityIndicator, Pressable, Text, View } from 'react-native'
 import { useDefaultMailbox } from '../hooks/useDefaultMailbox'
+import { useInstalledSlugs } from '../hooks/useInstalledSlugs'
 import { SERVICE_LABELS } from '../lib/service-labels'
 import { useTakeoutImport } from '../lib/takeout-import'
 import type { ImportProgress, ImportService } from '../lib/takeout-import/types'
@@ -38,8 +38,7 @@ const SERVICE_META: Record<ImportService, { label: string; Icon: typeof Users }>
 export function GoogleTakeoutImportSection() {
     const userId = useAuth().user.id
     const { mailboxId, loading: mailboxLoading } = useDefaultMailbox()
-    const packages = usePackages()
-    const installedSlugs = new Set(packages.map(p => p.slug))
+    const installedSlugs = useInstalledSlugs()
 
     const { selectFiles, startImport, requestCancel, store } = useTakeoutImport({
         userId,
