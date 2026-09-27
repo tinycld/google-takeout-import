@@ -31,7 +31,7 @@ describe('importFinishedNotice', () => {
 
     it('joins more than two services with commas', () => {
         const notice = importFinishedNotice('user-1', ['contacts', 'calendar', 'drive', 'mail'])
-        expect(notice.body).toBe('Contacts, Calendar, Drive, Mail imported successfully.')
+        expect(notice.body).toBe('Import finished: Contacts, Calendar, Drive, Mail.')
     })
 
     it('links to the takeout settings panel', () => {

@@ -23,7 +23,7 @@ export function importFinishedNotice(userId: string, services: ImportService[]) 
         type: IMPORT_NOTICE_TYPE,
         package: IMPORT_NOTICE_PACKAGE,
         title: 'Import from Google finished',
-        body: `${names} imported successfully.`,
+        body: `Import finished: ${names}.`,
         url: IMPORT_PANEL_HREF,
         metadata: { services },
         read: false,

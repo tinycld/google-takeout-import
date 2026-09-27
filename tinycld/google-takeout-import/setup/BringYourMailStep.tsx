@@ -13,9 +13,9 @@ import {
     IMPORT_PANEL_HREF,
 } from '../lib/takeout-import/import-notice'
 
-// Only an admin or owner can install/configure things, and importing mail
-// affects the whole org's mailbox — mirrors the other admin-gated steps
-// (e.g. hosting-ui's PlanStep).
+// The wizard itself only opens for owners and admins, so this step matches
+// that gate — mirrors the other admin-gated steps (e.g. hosting-ui's
+// PlanStep). The import writes only the importing user's own data.
 export function useIsStepVisible(): boolean | undefined {
     const { isReady, isAdmin } = useCurrentRole()
     return isReady ? isAdmin : undefined

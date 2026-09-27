@@ -52,3 +52,5 @@ See [What gets imported](help://google-takeout-import:what-gets-imported) for th
 ## The "Bring your mail" setup step
 
 New workspaces show a **Bring your mail** step in the setup wizard, for owners and admins. Click **Import from Google** to open this same import screen. The step is marked done once an import finishes and sends its "Import from Google finished" notification — it does not require every service to be imported, only that one run has completed. Click **Continue** to skip the step and import later from **Settings → Import from Google**.
+
+This step is done only for the person who ran the import. Each person must import their own data.
