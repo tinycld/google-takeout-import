@@ -17,7 +17,7 @@ describe('google-takeout-import manifest', () => {
         expect(panel?.label).toBe('Import from Google')
     })
 
-    it('has no routes / nav / server (settings + a setup step only)', () => {
+    it('has no routes / nav / server (settings only)', () => {
         // The literal type doesn't include these fields at all; asserting
         // via `in` keeps the check runtime-only and TS-quiet.
         expect('routes' in manifest).toBe(false)
@@ -25,14 +25,9 @@ describe('google-takeout-import manifest', () => {
         expect('server' in manifest).toBe(false)
     })
 
-    it('contributes the Bring your mail setup step', () => {
-        expect(manifest.setupSteps).toEqual([
-            {
-                id: 'import',
-                label: 'Bring your mail',
-                module: 'setup/BringYourMailStep',
-                order: 'a4',
-            },
-        ])
+    // An import can run for a long time; a wizard step would hold a new
+    // workspace on it. The import lives in Settings only.
+    it('contributes no setup step', () => {
+        expect('setupSteps' in manifest).toBe(false)
     })
 })
