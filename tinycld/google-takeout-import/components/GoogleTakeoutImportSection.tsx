@@ -1,6 +1,5 @@
 import { HelpIcon } from '@tinycld/core/components/help/HelpIcon'
 import { useAuth } from '@tinycld/core/lib/auth'
-import { usePackages } from '@tinycld/core/lib/packages/use-packages'
 import { useThemeColor } from '@tinycld/core/lib/use-app-theme'
 import { Switch } from '@tinycld/core/ui/switch'
 import {
@@ -17,21 +16,29 @@ import {
 import { useState } from 'react'
 import { ActivityIndicator, Pressable, Text, View } from 'react-native'
 import { useDefaultMailbox } from '../hooks/useDefaultMailbox'
+import { useInstalledSlugs } from '../hooks/useInstalledSlugs'
+import { SERVICE_LABELS } from '../lib/service-labels'
 import { useTakeoutImport } from '../lib/takeout-import'
 import type { ImportProgress, ImportService } from '../lib/takeout-import/types'
 
+const SERVICE_ICONS: Record<ImportService, typeof Users> = {
+    contacts: Users,
+    calendar: Calendar,
+    drive: HardDrive,
+    mail: Mail,
+}
+
 const SERVICE_META: Record<ImportService, { label: string; Icon: typeof Users }> = {
-    contacts: { label: 'Contacts', Icon: Users },
-    calendar: { label: 'Calendar', Icon: Calendar },
-    drive: { label: 'Drive', Icon: HardDrive },
-    mail: { label: 'Mail', Icon: Mail },
+    contacts: { label: SERVICE_LABELS.contacts, Icon: SERVICE_ICONS.contacts },
+    calendar: { label: SERVICE_LABELS.calendar, Icon: SERVICE_ICONS.calendar },
+    drive: { label: SERVICE_LABELS.drive, Icon: SERVICE_ICONS.drive },
+    mail: { label: SERVICE_LABELS.mail, Icon: SERVICE_ICONS.mail },
 }
 
 export function GoogleTakeoutImportSection() {
     const userId = useAuth().user.id
     const { mailboxId, loading: mailboxLoading } = useDefaultMailbox()
-    const packages = usePackages()
-    const installedSlugs = new Set(packages.map(p => p.slug))
+    const installedSlugs = useInstalledSlugs()
 
     const { selectFiles, startImport, requestCancel, store } = useTakeoutImport({
         userId,

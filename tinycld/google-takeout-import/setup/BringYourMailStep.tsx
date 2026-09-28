@@ -7,22 +7,58 @@ import { useMyLiveQuery } from '@tinycld/core/lib/use-my-live-query'
 import { Button, ButtonText } from '@tinycld/core/ui/button'
 import { useRouter } from 'expo-router'
 import { Text, View } from 'react-native'
+import { useInstalledSlugs } from '../hooks/useInstalledSlugs'
+import { SERVICE_LABELS } from '../lib/service-labels'
 import {
     IMPORT_NOTICE_PACKAGE,
     IMPORT_NOTICE_TYPE,
     IMPORT_PANEL_HREF,
 } from '../lib/takeout-import/import-notice'
+import type { ImportService } from '../lib/takeout-import/types'
+
+// Order matches GoogleTakeoutImportSection's SERVICE_META / detection order.
+// Gmail is the service's marketing name; SERVICE_LABELS.mail ("Mail") names
+// the installed package instead, so this step's own copy is worded here.
+const STEP_SERVICE_LABELS: Record<ImportService, string> = {
+    ...SERVICE_LABELS,
+    mail: 'Gmail',
+}
+const STEP_SERVICES: ImportService[] = ['mail', 'contacts', 'calendar', 'drive']
+
+// Names only the services the reader actually has installed — naming an
+// uninstalled service (e.g. "Drive" on a mail-only deployment) promises data
+// this step can't deliver.
+export function importStepCopy(installedSlugs: Set<string>): string {
+    const names = STEP_SERVICES.filter(svc => installedSlugs.has(svc)).map(
+        svc => STEP_SERVICE_LABELS[svc]
+    )
+    if (names.length === 0) {
+        return 'Import your data from a Google Takeout export.'
+    }
+    return `Import your ${names.join(', ')} from a Google Takeout export.`
+}
 
 // The wizard itself only opens for owners and admins, so this step matches
 // that gate — mirrors the other admin-gated steps (e.g. hosting-ui's
 // PlanStep). The import writes only the importing user's own data.
-export function useIsStepVisible(): boolean | undefined {
-    const { isReady, isAdmin } = useCurrentRole()
-    return isReady ? isAdmin : undefined
+export function isStepVisibleFromRole(role: string | null | undefined): boolean | undefined {
+    if (role === undefined) return undefined
+    return role === 'owner' || role === 'admin'
 }
 
-// Done once Task 19's import-finished notification exists for this user — a
-// single indexed lookup, cheap enough to run on every wizard render.
+export function useIsStepVisible(): boolean | undefined {
+    const { isReady, role } = useCurrentRole()
+    return isStepVisibleFromRole(isReady ? role : undefined)
+}
+
+// Done once an import-finished notification exists for this user — the step
+// asks whether an import ever completed, not whether one is in progress now.
+export function isStepDoneFromRow(row: unknown, isLoading: boolean): boolean | undefined {
+    if (isLoading) return undefined
+    return row !== undefined
+}
+
+// A single indexed lookup, cheap enough to run on every wizard render.
 export function useIsStepDone(): boolean | undefined {
     const [notificationsCollection] = useStore('notifications')
     const { data, isReady } = useMyLiveQuery((query, { userId }) =>
@@ -33,17 +69,18 @@ export function useIsStepDone(): boolean | undefined {
             .where(({ n }) => eq(n.type, IMPORT_NOTICE_TYPE))
             .findOne()
     )
-    return isReady ? data !== undefined : undefined
+    return isStepDoneFromRow(data, !isReady)
 }
 
 export default function BringYourMailStep({ next }: SetupStepProps) {
     const router = useRouter()
+    const installedSlugs = useInstalledSlugs()
     const openImportPanel = () => router.push(IMPORT_PANEL_HREF)
     return (
         <View className="max-w-[440px] gap-1">
             <Text className="text-2xl font-bold text-foreground">Bring your mail</Text>
             <Text className="mb-3 text-sm text-muted-foreground">
-                Import your Gmail, Contacts, Calendar, and Drive from a Google Takeout export.
+                {importStepCopy(installedSlugs)}
             </Text>
             <Button
                 variant="outline"
