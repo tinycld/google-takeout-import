@@ -48,9 +48,3 @@ To get under the limit, import the export in stages: select some of the numbered
 ## What lands where
 
 See [What gets imported](help://google-takeout-import:what-gets-imported) for the per-service details, and [Importing contacts from Google](help://contacts:importing) for how imported contacts are matched to ones you already have.
-
-## The "Bring your mail" setup step
-
-New workspaces show a **Bring your mail** step in the setup wizard, for owners and admins. Click **Import from Google** to open this same import screen. The step is marked done once an import finishes and sends its "Import from Google finished" notification — it does not require every service to be imported, only that one run has completed. Click **Continue** to skip the step and import later from **Settings → Import from Google**.
-
-This step is done only for the person who ran the import. Each person must import their own data.
