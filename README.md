@@ -6,7 +6,7 @@ A feature package for the [tinycld](https://tinycld.org/) ecosystem. Lives as a 
 
 ## What it does
 
-Adds one screen, **Settings → Import from Google** (`/a/settings/google-takeout`). The user selects one or more Takeout `.zip` files, the package scans them and reports what it found per service, the user unticks anything they don't want, and **Start Import** streams the records into the owning packages' collections with live per-service progress.
+Adds one screen, **Settings → Import from Google** (`/a/settings/google-takeout-import/google-takeout`). The user selects one or more Takeout `.zip` files, the package scans them and reports what it found per service, the user unticks anything they don't want, and **Start Import** streams the records into the owning packages' collections with live per-service progress.
 
 User-facing behavior:
 
@@ -15,7 +15,7 @@ User-facing behavior:
 - **Package-presence gating** — a service is offered only if the owning package is installed, read from the runtime registry (`usePackages()`), never from a hard import. On a deployment without `drive`, Drive files in the archive are simply greyed out.
 - **Mailbox prerequisite** — mail lands in the user's default mailbox (`useDefaultMailbox`, the first `mail_mailbox_members` row where `user` is the current user). If Mail is detected but no mailbox resolves, the row is disabled and the screen says *"Mail was found but you don't have a mailbox set up."* Start is also held while the mailbox lookup is still in flight so a mail import can never launch with a null mailbox; `runFallbackImport` re-checks this (Guard B) and throws rather than silently importing zero threads.
 - **Progress, cancel, and errors** — one progress card per active service (`Scanning...` → `NN%` → `Done`, with imported / skipped / errors counts). Per-record failures are recorded and the run continues; a **Show errors** disclosure lists the first 20 messages and summarises the rest. **Cancel Import** stops at the next record and leaves already-written records in place; the screen returns to the detection view so the same selection can be started again. Whole-run failures (unreadable zip, over the size limit, mail with no mailbox) show **Import Failed** with **Try Again**.
-- **Completion** — *Import Complete — N records imported, N skipped, N errors* with **Import More**, which resets the store to the file-select state.
+- **Completion** — *Import Complete — N records imported, N skipped, N errors* with **Import More**, which resets the store to the file-select state. A finished run also writes one `import-finished` notice into core `notifications` (`recordImportFinished` in `lib/takeout-import/record-import-finished.ts`, payload from `import-notice.ts`) linking back to this screen; a failed notice write is logged and never turns the completed import into an error.
 - **Idempotent re-runs** — every record type is deduplicated against what already exists (see below). A re-import of the same archive, or of a later export of the same account, adds only new items. An existing record is **skipped, never updated**.
 
 Runs on web and native identically: the import used to run in a Web Worker on web, but the worker module was never bundled (this package ships raw `.ts` with no Metro config), so construction 404'd and fell through to the main thread every time. The worker path is gone; `run-import.web.ts` and `run-import.native.ts` are kept only for Metro's platform-suffix resolution and are byte-for-byte the same logic.
@@ -35,7 +35,7 @@ const manifest = {
     ],
     help: { directory: 'help' },
     repository: { url: 'https://github.com/tinycld/google-takeout-import' },
-    peerVersions: { '@tinycld/core': '>=0.1.0 <0.2.0' },
+    peerVersions: { '@tinycld/core': '…' },  // the current core range — see manifest.ts
 }
 ```
 
@@ -107,6 +107,8 @@ The inserter writes into collections owned by four other packages plus core. It 
 | | `mail_thread_state` | `thread`, `folder`, `is_read`, `is_starred` | `user = userId` |
 | | core `labels` + `label_assignments` | one label per custom Gmail label (colour `#3949ab`), assigned to the `mail_thread_state` row | `user = userId` |
 
+Outside the inserter, `useTakeoutImport` writes one row into core `notifications` when a run completes (`type: 'import-finished'`, `package: 'google-takeout-import'`, `url` pointing at the import screen). This goes through pbtsdb (`notificationsCollection.insert` inside `performMutations`), not the raw handle.
+
 Every created record gets a client-side `newRecordId()`; `contacts.vcard_uid` and `calendar_events.ical_uid` fall back to `crypto.randomUUID()` when the source had none, so the row is deduplicable on a later run.
 
 ### Dedup rules
@@ -138,6 +140,10 @@ The calendar-name, `ical_uid`, and `message_id` lookups are deliberately unscope
 ```
 tests/
     manifest.test.ts                       settings-only contract (no routes / nav / server)
+    import-notice.test.ts                  import-finished notice payload: user, package / type constants, title,
+                                           body labels, and the settings-screen href
+    service-labels.test.ts                 SERVICE_LABELS covers every ImportService and feeds the notice body
+    record-import-finished.test.ts         recordImportFinished resolves on success and on failure (one warn)
     batch-inserter-schema.test.ts          mirrored-schema contract (below)
     batch-inserter-dedup-errors.test.ts    only a 404 means "not found"; anything else aborts the row
     import-worker-fallback.test.ts         streaming: drive payloads decompressed exactly once, folders
@@ -165,8 +171,12 @@ tinycld/google-takeout-import/
         GoogleTakeoutImportSection.tsx   the six states: idle / detecting / detected / importing / complete / error
     hooks/
         useDefaultMailbox.ts    first mail_mailbox_members row for the user (raw pb read; mail may be absent)
+        useInstalledSlugs.ts    memoized Set of installed package slugs from usePackages() (presence gating)
+    lib/service-labels.ts       SERVICE_LABELS: one display label per ImportService (UI + notice body)
     lib/takeout-import/
-        index.ts                useTakeoutImport: pickers, detect, start, cancel
+        index.ts                useTakeoutImport: pickers, detect, start, cancel, import-finished notice
+        import-notice.ts        importFinishedNotice payload + IMPORT_PANEL_HREF / type / package constants
+        record-import-finished.ts   recordImportFinished: runs the notice write, logs instead of throwing
         types.ts                TakeoutFile, ImportContext, Parsed* record shapes
         run-import.ts           base module (never runs; Metro picks a platform file)
         run-import.web.ts       main-thread runner (web)
