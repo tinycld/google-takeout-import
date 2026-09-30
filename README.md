@@ -221,7 +221,7 @@ These scripts delegate to `tinycld-pkg` (the `@tinycld/package-scripts` workspac
 
 - `manifest.ts` — settings entry, `help` directory, `peerVersions`
 - `package.json` — name, exports map, `fflate` / `ical.js` peer deps
-- `tsconfig.json` — typecheck config (extends the app's `tsconfig.package-base.json`)
+- `tsconfig.json` — typecheck config (extends core's `tinycld/core/tsconfig.package-base.json`)
 - `help/` — in-app help topics (markdown + frontmatter)
 - `tests/` — vitest unit tests, the mirrored-schema contract, real Takeout fixtures, Playwright e2e
 - `vitest.config.ts` / `playwright.config.ts` — thin per-package configs inheriting the app shell's canonical config
