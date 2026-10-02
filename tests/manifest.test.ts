@@ -8,10 +8,12 @@ describe('google-takeout-import manifest', () => {
         expect(manifest.version).toMatch(/^\d+\.\d+\.\d+/)
     })
 
-    it('contributes a settings panel', () => {
-        expect(Array.isArray(manifest.settings)).toBe(true)
-        expect(manifest.settings?.length).toBeGreaterThan(0)
-        const panel = manifest.settings?.[0]
+    // The import acts on the viewer's own data, so it is a per-user panel any
+    // role can open, not an admin-only org panel.
+    it('contributes an account settings panel', () => {
+        expect('settings' in manifest).toBe(false)
+        expect(manifest.accountSettings.length).toBeGreaterThan(0)
+        const panel = manifest.accountSettings[0]
         expect(panel?.slug).toBe('google-takeout')
         expect(panel?.component).toBe('settings/takeout')
         expect(panel?.label).toBe('Import from Google')

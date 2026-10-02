@@ -63,10 +63,10 @@ test.describe('Google Takeout Import', () => {
     })
 
     test('run import and wait for completion', async ({ page }) => {
-        // In-app: Settings → the package's "Import from Google" entry.
+        // In-app: Settings → Account → "Import from Google".
         await navigateToPackage(page, 'settings')
         await page.getByText('Import from Google', { exact: true }).first().click()
-        await page.waitForURL(/google-takeout/)
+        await page.waitForURL(/settings\/account\/google-takeout-import\/google-takeout/)
         await expect(page.getByText('Import from Google').first()).toBeVisible()
 
         // Upload files again (serial tests share login but not page state)
