@@ -15,7 +15,7 @@ order: 10
 
 ## Run the import
 
-1. In TinyCld, open **Settings → Import from Google**.
+1. In TinyCld, open **Settings → Import from Google** (in the **Account** group).
 2. Click **Select Takeout Files** and pick **every part** of the export at once. The file picker allows multi-select; a part you leave out is simply not imported.
 3. The screen shows **Scanning zip files...** while it reads the archives. Nothing is written yet.
 4. When scanning finishes you see one row per service — **Contacts**, **Calendar**, **Drive**, **Mail** — each with a toggle and a count of what was found (for example *Contacts — 412 contacts* or *Mail — 18,203 messages*). A row is greyed out when that service is not in the archive or its TinyCld package is not installed on this server.

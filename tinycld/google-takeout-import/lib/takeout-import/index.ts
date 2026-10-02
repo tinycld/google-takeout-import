@@ -1,5 +1,6 @@
 import { captureException } from '@tinycld/core/lib/errors'
 import { performMutations, useMutation } from '@tinycld/core/lib/mutations'
+import { appHref } from '@tinycld/core/lib/org-routes'
 import { notificationsCollection } from '@tinycld/core/lib/pocketbase'
 import { useTakeoutImportStore } from '@tinycld/core/lib/stores/takeout-import-store'
 import * as DocumentPicker from 'expo-document-picker'
@@ -9,6 +10,9 @@ import { importFinishedNotice } from './import-notice'
 import { recordImportFinished } from './record-import-finished'
 import * as runImportImpl from './run-import'
 import type { ImportContext, ImportService, TakeoutFile } from './types'
+
+// This package's accountSettings panel (see manifest.ts).
+const IMPORT_SCREEN_HREF = appHref('settings/account/google-takeout-import/google-takeout')
 
 export { useTakeoutImportStore } from '@tinycld/core/lib/stores/takeout-import-store'
 
@@ -98,6 +102,7 @@ export function useTakeoutImport(context: ImportContext) {
         mutationFn: async (services: ImportService[]) => {
             store.setPhase('importing')
             store.setActiveServices(services)
+            store.setProgressHref(IMPORT_SCREEN_HREF)
 
             await runImportImpl.runImport(selectedFiles, services, contextRef.current)
 
