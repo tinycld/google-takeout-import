@@ -7,10 +7,11 @@ import type {
     ImportContext,
     ImportService,
     ParsedRecord,
-    TakeoutFile,
 } from '@tinycld/google-takeout-import/lib/takeout-import/types'
-import { strToU8, zipSync } from 'fflate'
+import { strToU8 } from 'fflate'
 import { describe, expect, it } from 'vitest'
+import { READ_CHUNK_BYTES } from '~/tinycld/google-takeout-import/lib/takeout-import/zip-reader'
+import { zipTakeoutFile } from './helpers/takeout-file'
 
 const MBOX_PATH = 'Takeout/Mail/All mail Including Spam and Trash.mbox'
 
@@ -33,19 +34,7 @@ function simpleMessage(threadId: string, subject: string, body: string): string 
     ].join('\n')
 }
 
-/** A TakeoutFile backed by an in-memory zip, counting how often it's read. */
-function zipFile(entries: Record<string, Uint8Array>): TakeoutFile & { reads: number } {
-    const bytes = zipSync(entries)
-    const file = {
-        name: 'takeout.zip',
-        reads: 0,
-        async arrayBuffer() {
-            file.reads++
-            return bytes.buffer.slice(0) as ArrayBuffer
-        },
-    }
-    return file
-}
+const zipFile = (entries: Parameters<typeof zipTakeoutFile>[0]) => zipTakeoutFile(entries)
 
 const CONTEXT: ImportContext = { userId: 'u1', mailboxId: 'mb1' }
 
@@ -70,7 +59,7 @@ function collectingCallbacks(overrides: Partial<FallbackCallbacks> = {}) {
 }
 
 describe('runFallbackImport streaming', () => {
-    it('streams mbox threads as records', async () => {
+    it('streams mbox messages as records carrying their thread plan', async () => {
         const file = zipFile({
             [MBOX_PATH]: strToU8(
                 mbox([
@@ -83,9 +72,11 @@ describe('runFallbackImport streaming', () => {
 
         await runFallbackImport([file], ['mail'], CONTEXT, callbacks)
 
-        const threads = batches.flatMap(b => b.records).filter(r => r.recordType === 'mail_thread')
-        expect(threads).toHaveLength(2)
-        expect(threads.map(t => t.subject).sort()).toEqual(['Hello', 'World'])
+        const messages = batches
+            .flatMap(b => b.records)
+            .filter(r => r.recordType === 'mail_message')
+        expect(messages).toHaveLength(2)
+        expect(messages.map(m => m.thread.subject).sort()).toEqual(['Hello', 'World'])
         expect(isDone()).toBe(true)
     })
 
@@ -157,8 +148,16 @@ describe('runFallbackImport streaming', () => {
     })
 
     it('does not read drive payloads during detection', async () => {
+        // Random bytes do not compress, so the stored payload is ~2 MB.
+        const payload = crypto.getRandomValues(new Uint8Array(65536))
+        const big = new Uint8Array(32 * payload.length)
+        for (let i = 0; i < 32; i++)
+            big.set(
+                payload.map(b => b ^ i),
+                i * payload.length
+            )
         const file = zipFile({
-            'Takeout/Drive/a.txt': strToU8('drive'),
+            'Takeout/Drive/a.bin': big,
             'Takeout/Contacts/c.vcf': strToU8(
                 'BEGIN:VCARD\nVERSION:3.0\nFN:Jane Doe\nEMAIL:jane@example.com\nEND:VCARD'
             ),
@@ -170,19 +169,28 @@ describe('runFallbackImport streaming', () => {
         expect(detection.driveFileCount).toBe(1)
         expect(detection.hasContacts).toBe(true)
         expect(detection.contactCount).toBe(1)
+        const bytesRead = file.reads.reduce((sum, n) => sum + n, 0)
+        expect(bytesRead).toBeLessThan(big.length / 4)
     })
 })
 
-describe('detectOnly + runFallbackImport extraction count', () => {
-    it('reads each zip a bounded number of times across detect + import', async () => {
-        const file = zipFile({ [MBOX_PATH]: strToU8(mbox([simpleMessage('t1', 'Hi', 'b')])) })
+describe('range reads', () => {
+    it('never reads more than one chunk of an archive at a time', async () => {
+        const messages = Array.from({ length: 3000 }, (_, i) =>
+            simpleMessage(`t${i}`, `Subject ${i}`, 'x'.repeat(1000))
+        )
+        const file = zipFile({ [MBOX_PATH]: [strToU8(mbox(messages)), { level: 0 }] })
 
-        await detectOnly([file])
-        expect(file.reads).toBe(1)
+        const detection = await detectOnly([file])
+        expect(detection.mailThreadCount).toBe(3000)
 
-        const { callbacks } = collectingCallbacks()
+        const { callbacks, batches } = collectingCallbacks()
         await runFallbackImport([file], ['mail'], CONTEXT, callbacks)
-        // Import does one names scan + one streaming pass = two reads of the zip.
-        expect(file.reads).toBe(3)
+
+        const imported = batches
+            .flatMap(b => b.records)
+            .filter(r => r.recordType === 'mail_message')
+        expect(imported).toHaveLength(3000)
+        expect(Math.max(...file.reads)).toBeLessThanOrEqual(READ_CHUNK_BYTES)
     })
 })
