@@ -29,7 +29,7 @@ Each service you started gets its own row: *Reading archive…* while the archiv
 
 Keep the tab or app open until you see **Import complete**. The import runs in your browser or app, not on the server, so closing it stops the import. Large mail exports can take a while; you can keep using other tabs.
 
-An item that fails to import does not stop the import. The row shows *N items failed — show details*; click it to see what went wrong for the first 20 items.
+An item that fails to import does not stop the import. The row shows *N items failed — show details*; click it to see what went wrong for the first 20 items. The list also names everything in the export that could not be read — for example a calendar event with no start time, an empty contact card, or a mail attachment that could not be decoded (the message itself still imports). Nothing in the export is left out without appearing in this list.
 
 Click **Cancel import** to stop early. The button reads **Canceling…** until the item currently being written finishes; everything imported up to that point stays in TinyCld, and the screen returns to the service list so you can start again later. A second run picks up where the first left off because already-imported items are skipped.
 
