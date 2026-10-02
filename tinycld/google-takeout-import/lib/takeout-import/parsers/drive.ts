@@ -95,6 +95,13 @@ export function foldersFromPaths(paths: Iterable<string>): ParsedDriveFolder[] {
         )
 }
 
+// The entry's own buffer when the bytes fill it (as `readEntry` returns them),
+// so a large file is not copied a second time.
+function ownBuffer(data: Uint8Array): ArrayBuffer {
+    const whole = data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
+    return (whole ? data.buffer : data.slice().buffer) as ArrayBuffer
+}
+
 /**
  * Build a drive-file record from a single streamed entry. The entry bytes flow
  * straight into the record and on to the PocketBase create, then are released —
@@ -114,6 +121,6 @@ export function driveFileFromEntry(path: string, data: Uint8Array): ParsedDriveF
         parentPath,
         mime_type: inferMimeType(name),
         size: data.byteLength,
-        bytes: new Uint8Array(data).buffer as ArrayBuffer,
+        bytes: ownBuffer(data),
     }
 }

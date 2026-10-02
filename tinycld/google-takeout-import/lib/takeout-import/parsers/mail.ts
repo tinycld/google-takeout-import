@@ -1,4 +1,4 @@
-import type { ParsedAttachment, ParsedMailMessage, ParsedMailThread } from '../types'
+import type { ParsedAttachment, ParsedMailMessage } from '../types'
 
 // ── Byte → string decode layer ──────────────────────────────────────────────
 //
@@ -29,9 +29,17 @@ export function decodeBase64ToBytes(base64: string): Uint8Array {
     return bytes
 }
 
-/** Attachment path: base64 → ArrayBuffer (raw bytes, never charset-decoded). */
-function decodeBase64ToBuffer(base64: string): ArrayBuffer {
-    return decodeBase64ToBytes(base64).buffer as ArrayBuffer
+/**
+ * Attachment path: transport-decode to raw bytes, never charset-decoded.
+ * Attachments are usually base64, but quoted-printable and unencoded 7bit/8bit
+ * parts are legal and must not be treated as corrupt base64.
+ */
+function decodeAttachmentBytes(body: string, encoding: string): ArrayBuffer {
+    const lower = encoding.toLowerCase().trim()
+    if (lower === 'base64') return decodeBase64ToBytes(body.trim()).buffer as ArrayBuffer
+    if (lower === 'quoted-printable')
+        return decodeQuotedPrintableToBytes(body).buffer as ArrayBuffer
+    return new TextEncoder().encode(body).buffer as ArrayBuffer
 }
 
 /** Decode quoted-printable transport to raw bytes (soft breaks stripped). */
@@ -59,177 +67,133 @@ export function extractCharset(contentType: string): string | undefined {
     return match?.[1]
 }
 
-const MBOX_PATHS = [
-    'Takeout/Mail/All mail Including Spam and Trash.mbox',
-    'Takeout/Mail/All Mail Including Spam and Trash.mbox',
-]
-
-function findMboxData(entries: Map<string, Uint8Array>): Uint8Array | undefined {
-    for (const candidate of MBOX_PATHS) {
-        const data = entries.get(candidate)
-        if (data) return data
-    }
-    for (const [path, data] of entries) {
-        if (path.includes('Mail/') && path.endsWith('.mbox')) return data
-    }
-    return undefined
-}
-
 /** Path test used by the extractor to route mbox entries to the mail parser. */
 export function isMboxPath(path: string): boolean {
     return path.includes('Mail/') && path.endsWith('.mbox')
 }
 
-/**
- * Fast message count by scanning for "From " line separators in raw bytes
- * without decoding the full mbox content.
- */
-export function countMboxMessagesInBytes(mboxData: Uint8Array): number {
-    // "From " as bytes: 70 114 111 109 32
-    const F = 70
-    const r = 114
-    const o = 111
-    const m = 109
-    const space = 32
-    const newline = 10
+const NEWLINE = 10
+const messageDecoder = new TextDecoder('utf-8')
 
-    let count = 0
-    const len = mboxData.length
-
-    for (let i = 0; i < len - 4; i++) {
-        // Match "From " at start of file or after a newline
-        if (
-            mboxData[i] === F &&
-            mboxData[i + 1] === r &&
-            mboxData[i + 2] === o &&
-            mboxData[i + 3] === m &&
-            mboxData[i + 4] === space &&
-            (i === 0 || mboxData[i - 1] === newline)
-        ) {
-            count++
-        }
-    }
-
-    return count
+export interface MailAddress {
+    name: string
+    email: string
 }
 
-export function countMboxMessages(entries: Map<string, Uint8Array>): number {
-    const mboxData = findMboxData(entries)
-    if (!mboxData) return 0
-    return countMboxMessagesInBytes(mboxData)
-}
-
-/**
- * Parse an mbox from its raw bytes, yielding one thread at a time.
- *
- * The whole mbox is decoded once as UTF-8 up front (accepted limitation, see
- * below), then split on message boundaries. Each raw message string is parsed
- * and released before the next, so the transient per-message allocation is
- * bounded. Thread grouping still requires buffering parsed-message metadata
- * (not raw bytes) until the mbox is fully scanned, because a Gmail thread's
- * messages are not guaranteed to be contiguous in the file.
- *
- * Accepted limitation: the top-level UTF-8 decode is lossless for
- * quoted-printable / base64 payloads (they are 7-bit ASCII transport, so the
- * declared charset is recovered downstream by `decodeTextPart`) — that covers
- * the entire stated charset defect. A raw 8-bit body with a non-UTF-8 charset
- * and no transfer encoding is already lossy after this decode; those are rare
- * in Gmail exports. A fully byte-oriented mbox splitter is a noted follow-up.
- */
-export function* parseMboxStream(mboxData: Uint8Array): Generator<ParsedMailThread> {
-    const text = new TextDecoder('utf-8').decode(mboxData)
-    const parsed: ParsedMboxMessage[] = []
-    for (const raw of splitMbox(text)) {
-        const message = parseRawMessage(raw)
-        if (message) parsed.push(message)
-    }
-    yield* groupIntoThreads(parsed)
-}
-
-/** Legacy Map-based entry point, retained for detection/tests. */
-export function parseMbox(entries: Map<string, Uint8Array>): ParsedMailThread[] {
-    const mboxData = findMboxData(entries)
-    if (!mboxData) return []
-    return [...parseMboxStream(mboxData)]
-}
-
-interface ParsedMboxMessage {
+/** What the plan pass needs from a message: its headers, never its body. */
+export interface MailHeaderInfo {
     gmailThreadId: string
-    gmailLabels: string[]
-    message: ParsedMailMessage
+    messageId: string
+    date: string
+    subject: string
+    labels: string[]
+    participants: MailAddress[]
 }
 
-function splitMbox(text: string): string[] {
-    const messages: string[] = []
-    // mbox separator: line starting with "From " at the very start or after a newline
-    const parts = text.split(/(?:^|\n)(?=From )/g)
-
-    for (const part of parts) {
-        const trimmed = part.trim()
-        if (!trimmed) continue
-        messages.push(trimmed)
+// End of the header block in raw bytes: the first blank line ("\n\n" or
+// "\n\r\n"), or the whole message when it has no body.
+function headerByteEnd(raw: Uint8Array) {
+    for (let nl = raw.indexOf(NEWLINE); nl !== -1; nl = raw.indexOf(NEWLINE, nl + 1)) {
+        if (raw[nl + 1] === NEWLINE) return nl
+        if (raw[nl + 1] === 13 && raw[nl + 2] === NEWLINE) return nl
     }
-
-    return messages
+    return raw.length
 }
 
-function parseRawMessage(raw: string): ParsedMboxMessage | null {
+interface RawParts {
+    headers: Record<string, string>
+    body: string
+}
+
+// Each message is decoded on its own, as UTF-8. That is lossless for
+// quoted-printable / base64 payloads (7-bit ASCII transport, so the declared
+// charset is recovered downstream by `decodeTextPart`). A raw 8-bit body with
+// a non-UTF-8 charset and no transfer encoding stays lossy; those are rare in
+// Gmail exports.
+function splitRawMessage(raw: string): RawParts | null {
     // Skip the "From " line
     const firstNewline = raw.indexOf('\n')
     if (firstNewline === -1) return null
 
     const messageContent = raw.slice(firstNewline + 1)
 
-    // Split headers from body at first blank line
+    // Split headers from body at the first blank line. A message with an empty
+    // body has none once the mbox chunk is trimmed — it is all headers.
     const headerEnd = messageContent.search(/\n\r?\n/)
-    if (headerEnd === -1) return null
+    const headerBlock = headerEnd === -1 ? messageContent : messageContent.slice(0, headerEnd)
+    const body = headerEnd === -1 ? '' : messageContent.slice(headerEnd).replace(/^\n\r?\n/, '')
+    return { headers: parseHeaders(headerBlock), body }
+}
 
-    const headerBlock = messageContent.slice(0, headerEnd)
-    const bodyBlock = messageContent.slice(headerEnd).replace(/^\n\r?\n/, '')
+function isoDate(dateHeader: string) {
+    try {
+        return new Date(dateHeader).toISOString()
+    } catch {
+        return new Date().toISOString()
+    }
+}
 
-    const headers = parseHeaders(headerBlock)
+/** Header-only parse of one raw mbox message; null when it has no headers. */
+export function readMailHeaders(raw: Uint8Array): MailHeaderInfo | null {
+    const parts = splitRawMessage(messageDecoder.decode(raw.subarray(0, headerByteEnd(raw))).trim())
+    if (!parts) return null
+    const { headers } = parts
+    return {
+        gmailThreadId: headers['x-gm-thrid'] || '',
+        messageId: headers['message-id'] || '',
+        date: isoDate(headers.date || ''),
+        subject: decodeHeaderValue(headers.subject || ''),
+        labels: parseGmailLabels(headers['x-gmail-labels'] || ''),
+        participants: [
+            senderAddress(headers),
+            ...parseAddressList(headers.to || ''),
+            ...parseAddressList(headers.cc || ''),
+        ],
+    }
+}
 
-    const gmailThreadId = headers['x-gm-thrid'] || ''
-    const gmailLabels = parseGmailLabels(headers['x-gmail-labels'] || '')
+/** Full parse of one raw mbox message; null when it has no headers. */
+export function parseMailMessage(raw: Uint8Array): ParsedMailMessage | null {
+    const parts = splitRawMessage(messageDecoder.decode(raw).trim())
+    if (!parts) return null
+    const { headers, body } = parts
 
-    const from = parseEmailAddress(headers.from || '')
-    const toList = parseAddressList(headers.to || '')
-    const ccList = parseAddressList(headers.cc || '')
-
+    const from = senderAddress(headers)
     const contentType = headers['content-type'] || ''
     const transferEncoding = headers['content-transfer-encoding'] || ''
-
-    const { html, attachments } = extractBody(bodyBlock, contentType, transferEncoding)
-
-    const dateStr = headers.date || ''
-    let isoDate: string
-    try {
-        isoDate = new Date(dateStr).toISOString()
-    } catch {
-        isoDate = new Date().toISOString()
-    }
-
-    const subject = decodeHeaderValue(headers.subject || '')
-    const snippet = stripHtml(html).slice(0, 300)
+    const { html, attachments, problems } = extractBody(body, contentType, transferEncoding)
 
     return {
-        gmailThreadId,
-        gmailLabels,
-        message: {
-            message_id: headers['message-id'] || '',
-            in_reply_to: headers['in-reply-to'] || '',
-            sender_name: from.name,
-            sender_email: from.email,
-            recipients_to: toList,
-            recipients_cc: ccList,
-            date: isoDate,
-            subject,
-            snippet,
-            body_html: html,
-            has_attachments: attachments.length > 0,
-            attachments,
-        },
+        message_id: headers['message-id'] || '',
+        in_reply_to: headers['in-reply-to'] || '',
+        sender_name: from.name,
+        sender_email: from.email,
+        recipients_to: parseAddressList(headers.to || ''),
+        recipients_cc: parseAddressList(headers.cc || ''),
+        date: isoDate(headers.date || ''),
+        subject: decodeHeaderValue(headers.subject || ''),
+        snippet: stripHtml(html).slice(0, 300),
+        body_html: html,
+        has_attachments: attachments.length > 0,
+        attachments,
+        problems,
     }
+}
+
+// mail_messages requires a sender address, but Gmail keeps messages that have
+// none: app notifications sent with no From header, and Apple Mail notes whose
+// From is only a name. Fall back through the other sender headers, then to a
+// reserved .invalid address so the message still imports.
+export const UNKNOWN_SENDER_EMAIL = 'unknown-sender@invalid'
+
+function senderAddress(headers: Record<string, string>): MailAddress {
+    const from = parseEmailAddress(headers.from || '')
+    if (from.email) return from
+    for (const key of ['sender', 'reply-to', 'return-path']) {
+        const fallback = parseEmailAddress(headers[key] || '')
+        if (fallback.email) return { name: from.name || fallback.name, email: fallback.email }
+    }
+    return { name: from.name, email: UNKNOWN_SENDER_EMAIL }
 }
 
 function parseHeaders(block: string): Record<string, string> {
@@ -258,13 +222,17 @@ function parseGmailLabels(labelsStr: string): string[] {
 }
 
 function parseEmailAddress(raw: string): { name: string; email: string } {
-    const decoded = decodeHeaderValue(raw)
-    // "Name" <email@example.com> or email@example.com
-    const match = decoded.match(/^(?:"?([^"<]*)"?\s*)?<?([^\s<>]+@[^\s<>]+)>?$/)
-    if (match) {
-        return { name: (match[1] || '').trim(), email: match[2].trim() }
+    const decoded = decodeHeaderValue(raw).trim()
+    // "Name" <email@example.com> — the name is only what precedes the brackets.
+    // A bare email@example.com has no name; a bare value with no "@" is only a
+    // name, never an address.
+    const bracketed = decoded.match(/^(.*?)<([^<>]+)>$/)
+    if (bracketed) {
+        const name = bracketed[1].trim().replace(/^"(.*)"$/, '$1')
+        return { name, email: bracketed[2].trim() }
     }
-    return { name: '', email: decoded.trim() }
+    if (!decoded.includes('@')) return { name: decoded.replace(/^"(.*)"$/, '$1'), email: '' }
+    return { name: '', email: decoded }
 }
 
 function parseAddressList(raw: string): { name: string; email: string }[] {
@@ -294,11 +262,14 @@ function decodeHeaderValue(value: string): string {
     )
 }
 
-function extractBody(
-    body: string,
-    contentType: string,
-    transferEncoding: string
-): { html: string; attachments: ParsedAttachment[] } {
+interface BodyResult {
+    html: string
+    attachments: ParsedAttachment[]
+    /** Parts that could not be imported; the message itself still imports. */
+    problems: string[]
+}
+
+function extractBody(body: string, contentType: string, transferEncoding: string): BodyResult {
     const lowerCt = contentType.toLowerCase()
 
     // Multipart message
@@ -310,21 +281,24 @@ function extractBody(
     const decoded = decodeTextPart(body, transferEncoding, charset)
 
     if (lowerCt.includes('text/html')) {
-        return { html: decoded, attachments: [] }
+        return { html: decoded, attachments: [], problems: [] }
     }
 
     // text/plain or unknown — wrap the decoded text so it is never discarded
     // (defect 5: the old code threw `decoded` away, forcing the raw-body
     // fallback that leaked quoted-printable artifacts).
-    return { html: `<pre>${escapeHtml(decoded)}</pre>`, attachments: [] }
+    return { html: `<pre>${escapeHtml(decoded)}</pre>`, attachments: [], problems: [] }
 }
 
-function parseMultipart(
-    body: string,
-    contentType: string
-): { html: string; attachments: ParsedAttachment[] } {
+function parseMultipart(body: string, contentType: string): BodyResult {
     const boundaryMatch = contentType.match(/boundary="?([^";\s]+)"?/i)
-    if (!boundaryMatch) return { html: '', attachments: [] }
+    if (!boundaryMatch) {
+        return {
+            html: `<pre>${escapeHtml(body)}</pre>`,
+            attachments: [],
+            problems: ['The body has no MIME boundary, so it was imported as raw text'],
+        }
+    }
 
     const boundary = boundaryMatch[1]
     const parts = body.split(`--${boundary}`)
@@ -332,6 +306,7 @@ function parseMultipart(
     let html = ''
     let plainText = ''
     const attachments: ParsedAttachment[] = []
+    const problems: string[] = []
 
     for (const part of parts) {
         if (part.trim() === '--' || !part.trim()) continue
@@ -351,6 +326,7 @@ function parseMultipart(
             const nested = parseMultipart(partBody, partCtRaw)
             if (nested.html) html = nested.html
             attachments.push(...nested.attachments)
+            problems.push(...nested.problems)
             continue
         }
 
@@ -366,10 +342,10 @@ function parseMultipart(
             const mimeType = partCt.split(';')[0].trim() || 'application/octet-stream'
 
             try {
-                const decoded = decodeBase64ToBuffer(partBody.trim())
+                const decoded = decodeAttachmentBytes(partBody, partEncoding)
                 attachments.push({ filename, mime_type: mimeType, bytes: decoded })
             } catch {
-                // Skip corrupted attachments
+                problems.push(`Attachment "${filename}" could not be decoded`)
             }
             continue
         }
@@ -389,7 +365,7 @@ function parseMultipart(
         html = `<pre>${escapeHtml(plainText)}</pre>`
     }
 
-    return { html, attachments }
+    return { html, attachments, problems }
 }
 
 /** Transport-decode a text part, then charset-decode the resulting bytes. */
@@ -433,109 +409,4 @@ function stripHtml(html: string): string {
 
 function escapeHtml(text: string): string {
     return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-// Label → folder mapping
-const LABEL_FOLDER_MAP: Record<string, string> = {
-    Inbox: 'inbox',
-    Sent: 'sent',
-    'Sent Messages': 'sent',
-    Draft: 'drafts',
-    Drafts: 'drafts',
-    Trash: 'trash',
-    Spam: 'spam',
-    Junk: 'spam',
-}
-
-function groupIntoThreads(messages: ParsedMboxMessage[]): ParsedMailThread[] {
-    const threadMap = new Map<string, ParsedMboxMessage[]>()
-
-    for (const msg of messages) {
-        const key = msg.gmailThreadId || msg.message.message_id || crypto.randomUUID()
-        const existing = threadMap.get(key)
-        if (existing) {
-            existing.push(msg)
-        } else {
-            threadMap.set(key, [msg])
-        }
-    }
-
-    const threads: ParsedMailThread[] = []
-
-    for (const [threadId, threadMessages] of threadMap) {
-        // Sort messages by date
-        threadMessages.sort(
-            (a, b) => new Date(a.message.date).getTime() - new Date(b.message.date).getTime()
-        )
-
-        const firstMsg = threadMessages[0]
-        const allLabels = new Set<string>()
-        for (const m of threadMessages) {
-            for (const l of m.gmailLabels) allLabels.add(l)
-        }
-
-        const labelsArr = [...allLabels]
-        const folder = resolveFolder(labelsArr)
-        const isRead = !labelsArr.includes('Unread')
-        const isStarred = labelsArr.includes('Starred')
-
-        // Custom labels (not standard Gmail labels or Category *)
-        const standardLabels = new Set([
-            'Inbox',
-            'Sent',
-            'Sent Messages',
-            'Draft',
-            'Drafts',
-            'Trash',
-            'Spam',
-            'Junk',
-            'Starred',
-            'Unread',
-            'Important',
-            'Opened',
-            'Chat',
-        ])
-        const customLabels = labelsArr.filter(
-            l => !standardLabels.has(l) && !l.startsWith('Category ')
-        )
-
-        threads.push({
-            recordType: 'mail_thread',
-            gmailThreadId: threadId,
-            subject: firstMsg.message.subject || '(No Subject)',
-            snippet: firstMsg.message.snippet,
-            messages: threadMessages.map(m => m.message),
-            folder,
-            is_read: isRead,
-            is_starred: isStarred,
-            labels: customLabels,
-        })
-    }
-
-    return threads
-}
-
-function resolveFolder(
-    labels: string[]
-): 'inbox' | 'sent' | 'drafts' | 'trash' | 'spam' | 'archive' {
-    // Check explicit folder labels (priority: trash > spam > drafts > sent > inbox)
-    for (const priority of [
-        'Trash',
-        'Spam',
-        'Junk',
-        'Draft',
-        'Drafts',
-        'Sent',
-        'Sent Messages',
-        'Inbox',
-    ]) {
-        if (labels.includes(priority)) {
-            return LABEL_FOLDER_MAP[priority] as 'inbox' | 'sent' | 'drafts' | 'trash' | 'spam'
-        }
-    }
-
-    // Non-standard labels: if has Unread flag → inbox, otherwise → archive
-    if (labels.includes('Unread')) return 'inbox'
-
-    return 'archive'
 }
