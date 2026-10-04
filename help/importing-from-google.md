@@ -15,6 +15,7 @@ order: 10
 
 ## Run the import
 
+
 1. In TinyCld, open **Settings → Import from Google**.
 2. Click **Select Takeout files** and pick **every part** of the export at once. The file picker allows multi-select; a part you leave out is simply not imported. The steps at the top of the screen — **Choose files**, **Pick services**, **Import** — show where you are.
 3. The screen shows **Reading your files…** while it reads the archives. Nothing is written yet.

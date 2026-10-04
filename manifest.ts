@@ -3,7 +3,7 @@ const manifest = {
     slug: 'google-takeout-import',
     version: '0.3.0',
     description: 'Import data from Google Takeout .zip files.',
-    settings: [
+    accountSettings: [
         {
             slug: 'google-takeout',
             component: 'settings/takeout',
