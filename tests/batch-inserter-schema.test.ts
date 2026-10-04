@@ -15,21 +15,24 @@ import type PocketBase from 'pocketbase'
 import { describe, expect, it } from 'vitest'
 import { createBatchInserter } from '~/tinycld/google-takeout-import/lib/takeout-import/batch-inserter'
 import type {
+    MailThreadPlan,
     ParsedCalendar,
     ParsedCalendarEvent,
     ParsedContact,
     ParsedDriveFile,
     ParsedDriveFolder,
-    ParsedMailThread,
+    ParsedMailMessage,
+    ParsedMailMessageRecord,
 } from '~/tinycld/google-takeout-import/lib/takeout-import/types'
 
 interface Recorded {
     filters: Map<string, Set<string>>
     createKeys: Map<string, string[][]>
+    updateKeys: Map<string, string[][]>
 }
 
 function recordingPb(): { pb: PocketBase; recorded: Recorded } {
-    const recorded: Recorded = { filters: new Map(), createKeys: new Map() }
+    const recorded: Recorded = { filters: new Map(), createKeys: new Map(), updateKeys: new Map() }
     let nextId = 0
 
     const noteFilter = (collection: string, filter: string) => {
@@ -58,6 +61,12 @@ function recordingPb(): { pb: PocketBase; recorded: Recorded } {
             recorded.createKeys.set(name, all)
             nextId += 1
             return Promise.resolve({ id: `rec_${nextId}` })
+        },
+        update: (_id: string, payload: Record<string, unknown>) => {
+            const all = recorded.updateKeys.get(name) ?? []
+            all.push(Object.keys(payload).sort())
+            recorded.updateKeys.set(name, all)
+            return Promise.resolve({ id: _id })
         },
     })
 
@@ -116,34 +125,46 @@ const driveFile: ParsedDriveFile = {
     bytes: new ArrayBuffer(5),
 }
 
-const mailThread: ParsedMailThread = {
-    recordType: 'mail_thread',
-    gmailThreadId: 'g1',
+const thread: MailThreadPlan = {
+    key: 'g1',
+    subject: 'Hello',
+    messageCount: 2,
+    latestDate: '2026-01-02T00:00:00Z',
+    participants: [{ name: 'Ada', email: 'ada@example.com' }],
+    folder: 'inbox',
+    isRead: false,
+    isStarred: false,
+    labels: ['Receipts'],
+    earliestMessageId: '<m1@x>',
+}
+
+const mailMessage: ParsedMailMessage = {
+    message_id: '<m1@x>',
+    in_reply_to: '<m0@x>',
+    sender_name: 'Ada',
+    sender_email: 'ada@example.com',
+    recipients_to: [{ name: 'Bob', email: 'bob@example.com' }],
+    recipients_cc: [],
+    date: '2026-01-01T00:00:00Z',
     subject: 'Hello',
     snippet: 'Hi there',
-    folder: 'inbox',
-    is_read: false,
-    is_starred: false,
-    labels: ['Receipts'],
-    messages: [
-        {
-            message_id: '<m1@x>',
-            in_reply_to: '<m0@x>',
-            sender_name: 'Ada',
-            sender_email: 'ada@example.com',
-            recipients_to: [{ name: 'Bob', email: 'bob@example.com' }],
-            recipients_cc: [],
-            date: '2026-01-01T00:00:00Z',
-            subject: 'Hello',
-            snippet: 'Hi there',
-            body_html: '<p>Hi</p>',
-            has_attachments: true,
-            attachments: [
-                { filename: 'a.pdf', mime_type: 'application/pdf', bytes: new ArrayBuffer(3) },
-            ],
-        },
-    ],
+    body_html: '<p>Hi</p>',
+    has_attachments: true,
+    attachments: [{ filename: 'a.pdf', mime_type: 'application/pdf', bytes: new ArrayBuffer(3) }],
+    problems: [],
 }
+
+// The thread is started by its later message, so the earliest one arriving
+// second fills in the thread snippet with an update.
+const mailMessages: ParsedMailMessageRecord[] = [
+    {
+        recordType: 'mail_message',
+        thread,
+        message: { ...mailMessage, message_id: '<m2@x>', date: '2026-01-02T00:00:00Z' },
+        isEarliest: false,
+    },
+    { recordType: 'mail_message', thread, message: mailMessage, isEarliest: true },
+]
 
 async function runFullImport() {
     const { pb, recorded } = recordingPb()
@@ -161,7 +182,7 @@ async function runFullImport() {
         calendarEvent,
         driveFolder,
         driveFile,
-        mailThread,
+        ...mailMessages,
     ])
     return recorded
 }
@@ -245,12 +266,11 @@ const EXPECTED_CREATE_KEYS: Record<string, string[][]> = {
             'size',
         ].sort(),
     ],
-    drive_shares: Array(2).fill(['created_by', 'id', 'item', 'role', 'user'].sort()),
     labels: [['color', 'id', 'name', 'user'].sort()],
     mail_threads: [
         ['latest_date', 'mailbox', 'message_count', 'participants', 'snippet', 'subject'].sort(),
     ],
-    mail_messages: [
+    mail_messages: Array(2).fill(
         [
             'attachments',
             'body_html',
@@ -265,10 +285,14 @@ const EXPECTED_CREATE_KEYS: Record<string, string[][]> = {
             'snippet',
             'subject',
             'thread',
-        ].sort(),
-    ],
+        ].sort()
+    ),
     mail_thread_state: [['folder', 'is_read', 'is_starred', 'thread', 'user'].sort()],
     label_assignments: [['collection', 'label', 'record_id', 'user'].sort()],
+}
+
+const EXPECTED_UPDATE_KEYS: Record<string, string[][]> = {
+    mail_threads: [['snippet']],
 }
 
 describe('batch inserter mirrored-schema contract', () => {
@@ -294,6 +318,11 @@ describe('batch inserter mirrored-schema contract', () => {
         for (const [collection, keySets] of Object.entries(EXPECTED_CREATE_KEYS)) {
             expect(recorded.createKeys.get(collection), collection).toEqual(keySets)
         }
+    })
+
+    it('updates records with exactly the owning packages’ field names', async () => {
+        const recorded = await runFullImport()
+        expect(Object.fromEntries(recorded.updateKeys)).toEqual(EXPECTED_UPDATE_KEYS)
     })
 
     it('carries no residue of the deleted hosting schema anywhere', async () => {

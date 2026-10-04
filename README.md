@@ -6,7 +6,7 @@ A feature package for the [tinycld](https://tinycld.org/) ecosystem. Lives as a 
 
 ## What it does
 
-Adds one screen, **Settings → Import from Google** (`/a/settings/google-takeout-import/google-takeout`). The user selects one or more Takeout `.zip` files, the package scans them and reports what it found per service, the user unticks anything they don't want, and **Start Import** streams the records into the owning packages' collections with live per-service progress.
+Adds one screen, **Settings → Import from Google** (`/a/settings/google-takeout-import/google-takeout`). The user selects one or more Takeout `.zip` files, the package scans them and reports what it found per service, the user turns off anything they don't want, and **Start import** streams the records into the owning packages' collections with live per-service progress.
 
 User-facing behavior:
 
@@ -14,8 +14,8 @@ User-facing behavior:
 - **Detection before commit** — the zip directories are read and only the small metadata artifacts (`.vcf`, `.ics`, `.mbox`) are decompressed to count contacts, events, and messages; Drive files are counted from entry names alone. The detection screen shows one row per service with a toggle and a count (`— 1,234 contacts`).
 - **Package-presence gating** — a service is offered only if the owning package is installed, read from the runtime registry (`usePackages()`), never from a hard import. On a deployment without `drive`, Drive files in the archive are simply greyed out.
 - **Mailbox prerequisite** — mail lands in the user's default mailbox (`useDefaultMailbox`, the first `mail_mailbox_members` row where `user` is the current user). If Mail is detected but no mailbox resolves, the row is disabled and the screen says *"Mail was found but you don't have a mailbox set up."* Start is also held while the mailbox lookup is still in flight so a mail import can never launch with a null mailbox; `runFallbackImport` re-checks this (Guard B) and throws rather than silently importing zero threads.
-- **Progress, cancel, and errors** — one progress card per active service (`Scanning...` → `NN%` → `Done`, with imported / skipped / errors counts). Per-record failures are recorded and the run continues; a **Show errors** disclosure lists the first 20 messages and summarises the rest. **Cancel Import** stops at the next record and leaves already-written records in place; the screen returns to the detection view so the same selection can be started again. Whole-run failures (unreadable zip, over the size limit, mail with no mailbox) show **Import Failed** with **Try Again**.
-- **Completion** — *Import Complete — N records imported, N skipped, N errors* with **Import More**, which resets the store to the file-select state. A finished run also writes one `import-finished` notice into core `notifications` (`recordImportFinished` in `lib/takeout-import/record-import-finished.ts`, payload from `import-notice.ts`) linking back to this screen; a failed notice write is logged and never turns the completed import into an error.
+- **Progress, cancel, and errors** — one row per active service (`Reading archive…` → `NN%` → check mark, with imported / skipped counts and a progress bar). Per-record failures are recorded and the run continues; an *N items failed* disclosure lists the first 20 messages and summarises the rest. **Cancel import** stops at the next record and leaves already-written records in place; the screen returns to the detection view so the same selection can be started again. Whole-run failures (unreadable zip, over the size limit, mail with no mailbox) show **Import failed** with **Try again**.
+- **Completion** — *Import complete — N items imported · N already here · N errors* with **Import more files**, which resets the store to the file-select state. A finished run also writes one `import-finished` notice into core `notifications` (`recordImportFinished` in `lib/takeout-import/record-import-finished.ts`, payload from `import-notice.ts`) linking back to this screen; a failed notice write is logged and never turns the completed import into an error.
 - **Idempotent re-runs** — every record type is deduplicated against what already exists (see below). A re-import of the same archive, or of a later export of the same account, adds only new items. An existing record is **skipped, never updated**.
 
 Runs on web and native identically: the import used to run in a Web Worker on web, but the worker module was never bundled (this package ships raw `.ts` with no Metro config), so construction 404'd and fell through to the main thread every time. The worker path is gone; `run-import.web.ts` and `run-import.native.ts` are kept only for Metro's platform-suffix resolution and are byte-for-byte the same logic.
@@ -57,7 +57,7 @@ The `settings` entry is what the generator turns into the Settings sidebar item;
 
 Import state (phase, detection, per-service progress, cancel flag) lives in a zustand store in **core**, `@tinycld/core/lib/stores/takeout-import-store`, not in this package. Core carries structural duplicates of `ImportService` / `ImportProgress` / `TakeoutDetection` so it compiles without this package linked; `lib/takeout-import/types.ts` here is the package-side copy, kept in sync by convention.
 
-`fflate` (zip) and `ical.js` (vCard + iCalendar) are this package's only third-party runtime deps, declared as `peerDependencies` like every framework dep.
+`fflate` (streaming inflate) and `ical.js` (vCard + iCalendar) are this package's only third-party runtime deps, declared as `peerDependencies` like every framework dep.
 
 ## Import pipeline
 
@@ -71,25 +71,28 @@ useTakeoutImport                               (lib/takeout-import/index.ts)
 run-import.{web,native}.ts                     identical; main thread
    ├─ detect()    → detectOnly()               (import-worker-fallback.ts)
    └─ runImport() → runFallbackImport()
-                      │  1. scanZipEntries: names + sizes only → drive folder tree, size guard
-                      │  2. streamZipEntries: decompress each entry once, route to a parser
+                      │  1. readZipEntries: central directories only → drive folder tree, size guard
+                      │  2. per entry: readEntry (small files, Drive files) or streamEntry (mbox)
+                      │     mbox: MboxSplitter → plan pass (headers) → insert pass (one message at a time)
                       ▼
-                    parsers/{contacts,calendar,drive,mail}.ts
-                      │  batched 50 records per service sink (bytes released per batch)
+                    parsers/{contacts,calendar,drive,mail,mail-plan,mbox-splitter}.ts
+                      │  batched per service sink: 50 records or 8 MB of payload, whichever comes first
                       ▼
                     createBatchInserter()      (batch-inserter.ts) → raw PocketBase REST
 ```
 
-`streaming-unzip.ts` is the reason a multi-GB export fits in memory: `scanZipEntries` decompresses only entries the caller opts into, and `streamZipEntries` hands each entry's bytes to the callback and drops them before reading the next. Nothing retains the full `Map<path, bytes>` the original implementation built (twice).
+Nothing loads a whole archive. `TakeoutFile` is a range reader (`takeout-file.ts`: `Blob.slice` on web, an `expo-file-system` `FileHandle` on native), and `zip-reader.ts` reads the central directory (with ZIP64 support) and inflates one entry at a time in 1 MB reads through fflate's synchronous streaming `Inflate` — its async API spawns a blob-URL Worker for large entries, which Hermes does not have. The mbox is never held whole: `MboxSplitter` emits each message as its bytes arrive. Because a Gmail thread's messages are scattered through the mbox, mail takes two passes: a header-only plan pass builds one `MailThreadPlan` per thread (subject, latest date, participants, labels, reply chain), then the insert pass parses one message at a time and the inserter creates each thread on its first message. Peak memory is a few MB of chunks, the plan's per-message metadata, and the largest single Drive file. A real 445 MB part holding a 767 MB mbox imports at under 200 MB of heap.
+
+An entry that cannot be read (corrupt data, unsupported compression) is reported as one unreadable item for its service (`EntryReadError`); nothing is skipped silently.
 
 ### Parsers and entry routing
 
 | Service | Entry match | Parser | Notes |
 |---|---|---|---|
 | Contacts | `*Contacts/**/*.vcf` | `parsers/contacts.ts` (ical.js vCard) | One `.vcf` may hold many cards; `N` preferred over `FN`; first `EMAIL` / `TEL` only |
-| Calendar | `*Calendar/**/*.ics` | `parsers/calendar.ts` (ical.js) | One `ParsedCalendar` per file, named from `X-WR-CALNAME` or the filename; events with no `DTSTART`, or with neither summary nor UID, are dropped |
+| Calendar | `*Calendar/**/*.ics` | `parsers/calendar.ts` (ical.js) | One `ParsedCalendar` per file, named from `X-WR-CALNAME` or the filename; an event with no `DTSTART` is reported as unreadable; one with no title imports as "(No title)" |
 | Drive | `Takeout/Drive/**` | `parsers/drive.ts` | Skips `*-metadata.json`; MIME inferred from extension; folder tree derived from paths (parents first) so files can resolve their parent |
-| Mail | `*Mail/**/*.mbox` | `parsers/mail.ts` | Charset-aware header/body decoding, multipart + attachments, `X-Gmail-Labels` → folder / read / starred / custom labels, messages grouped into threads by Gmail thread id |
+| Mail | `*Mail/**/*.mbox` | `parsers/mail.ts` | Charset-aware header/body decoding, multipart + attachments, `X-Gmail-Labels` → folder / read / starred / custom labels, threads planned from headers by Gmail thread id (`parsers/mail-plan.ts`), messages split as they stream (`parsers/mbox-splitter.ts`) |
 
 ### Where rows land (mirrored schema)
 
@@ -146,9 +149,12 @@ tests/
     record-import-finished.test.ts         recordImportFinished resolves on success and on failure (one warn)
     batch-inserter-schema.test.ts          mirrored-schema contract (below)
     batch-inserter-dedup-errors.test.ts    only a 404 means "not found"; anything else aborts the row
-    import-worker-fallback.test.ts         streaming: drive payloads decompressed exactly once, folders
-                                           before files, size guard, Guard B, bounded zip reads
-    streaming-unzip-real-takeout.test.ts   fflate against the real fixture zips (nested docx/pptx archives)
+    import-worker-fallback.test.ts         pipeline: drive payloads read once, folders before files, size
+                                           guard, Guard B, no read larger than one chunk
+    zip-reader.test.ts                     central directory on the real fixture zips (nested docx/pptx
+                                           archives), any read size, ZIP64, corrupt / unsupported entries
+    mbox-splitter.test.ts                  separators found at every chunk boundary, preamble reported
+    unreadable-items.test.ts               every unparseable item is reported, never dropped
     useDefaultMailbox.test.tsx             loading state + asserts the `user` filter field by name
     takeout-import.spec.ts                 Playwright: full import of the fixtures, then verifies each
                                            service's data through the owning package's UI
@@ -182,9 +188,10 @@ tinycld/google-takeout-import/
         run-import.web.ts       main-thread runner (web)
         run-import.native.ts    main-thread runner (iOS / Android), identical
         import-worker-fallback.ts   detectOnly + runFallbackImport, size guard, service sinks
-        streaming-unzip.ts      scanZipEntries / streamZipEntries over fflate
+        takeout-file.ts         range-reading TakeoutFile for a web File / native document
+        zip-reader.ts           readZipEntries / streamEntry / readEntry (central directory, ZIP64)
         batch-inserter.ts       createBatchInserter: dedup + writes into the mirrored collections
-        parsers/                contacts.ts  calendar.ts  drive.ts  mail.ts
+        parsers/                contacts.ts  calendar.ts  drive.ts  mail.ts  mail-plan.ts  mbox-splitter.ts
 ```
 
 ## Development

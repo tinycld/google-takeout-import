@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { ParsedMailThread } from '../types'
-import { parseMboxStream } from './mail'
+import type { MailThreadPlan, ParsedMailMessage } from '../types'
+import { parseMailMessage, readMailHeaders, UNKNOWN_SENDER_EMAIL } from './mail'
+import { MailPlanBuilder } from './mail-plan'
+import { MboxSplitter } from './mbox-splitter'
 
 // Build an mbox from complete raw messages (each already including its headers
 // and body). A synthetic "From " envelope line is prepended per message.
@@ -9,11 +11,38 @@ function mbox(messages: string[]): Uint8Array {
     return new TextEncoder().encode(text)
 }
 
-function threads(messages: string[]): ParsedMailThread[] {
-    return [...parseMboxStream(mbox(messages))]
+function rawMessages(messages: string[]): Uint8Array[] {
+    const splitter = new MboxSplitter()
+    return [...splitter.push(mbox(messages)), ...splitter.end()]
 }
 
-function onlyThread(messages: string[]): ParsedMailThread {
+interface Thread {
+    plan: MailThreadPlan
+    messages: ParsedMailMessage[]
+}
+
+// Both passes of the real import: headers into a plan, then full parses.
+function threads(messages: string[]): Thread[] {
+    const raws = rawMessages(messages)
+    const builder = new MailPlanBuilder()
+    raws.forEach((raw, index) => {
+        const headers = readMailHeaders(raw)
+        if (headers) builder.add(index, headers)
+    })
+    const plan = builder.build()
+    const byKey = new Map<string, Thread>()
+    raws.forEach((raw, index) => {
+        const planned = plan.lookup(index)
+        const message = parseMailMessage(raw)
+        if (!planned || !message) return
+        const thread = byKey.get(planned.thread.key) ?? { plan: planned.thread, messages: [] }
+        thread.messages.push(message)
+        byKey.set(planned.thread.key, thread)
+    })
+    return [...byKey.values()]
+}
+
+function onlyThread(messages: string[]): Thread {
     const t = threads(messages)
     expect(t).toHaveLength(1)
     return t[0]
@@ -176,5 +205,71 @@ describe('parseMbox charset-aware decoding', () => {
         const t = threads([msgA, msgB])
         expect(t).toHaveLength(1)
         expect(t[0].messages).toHaveLength(2)
+    })
+})
+
+describe('mbox splitting', () => {
+    it('ignores a body line that only contains "From " mid-line', () => {
+        const t = threads([message([], 'Mail From someone')])
+        expect(t).toHaveLength(1)
+    })
+})
+
+describe('empty-body messages', () => {
+    it('keeps a message that has headers and no body', () => {
+        const headersOnly = [...HEADERS, 'Subject: test help'].join('\r\n')
+        const t = threads([headersOnly, message(['X-GM-THRID: 2'], 'next')])
+        expect(t).toHaveLength(2)
+        const msg = t.flatMap(th => th.messages).find(m => m.subject === 'test help')
+        expect(msg?.sender_email).toBe('sender@example.com')
+    })
+})
+
+describe('sender addresses', () => {
+    function sender(from: string) {
+        const headers = HEADERS.map(h => (h.startsWith('From:') ? `From: ${from}` : h))
+        return onlyThread([[...headers, '', 'body'].join('\n')]).messages[0]
+    }
+
+    it('keeps a bare address whole', () => {
+        expect(sender('uskmodel@gmail.com')).toMatchObject({
+            sender_name: '',
+            sender_email: 'uskmodel@gmail.com',
+        })
+    })
+
+    it('keeps a name-only From and uses the placeholder address', () => {
+        expect(sender('Nathan Stitt')).toMatchObject({
+            sender_name: 'Nathan Stitt',
+            sender_email: UNKNOWN_SENDER_EMAIL,
+        })
+    })
+
+    it('falls back to the Sender header when From has no address', () => {
+        const headers = HEADERS.filter(h => !h.startsWith('From:'))
+        const msg = onlyThread([
+            [...headers, 'Sender: Bot <bot@example.com>', 'Return-Path: <>', '', 'body'].join('\n'),
+        ]).messages[0]
+        expect(msg).toMatchObject({ sender_name: 'Bot', sender_email: 'bot@example.com' })
+    })
+
+    it('uses the placeholder when no header has an address', () => {
+        const headers = HEADERS.filter(h => !h.startsWith('From:'))
+        const msg = onlyThread([[...headers, 'Return-Path: <>', '', 'body'].join('\n')]).messages[0]
+        expect(msg).toMatchObject({ sender_name: '', sender_email: UNKNOWN_SENDER_EMAIL })
+    })
+
+    it('splits a quoted name from a bracketed address', () => {
+        expect(sender('"Stitt, Nathan" <nathan@stitt.org>')).toMatchObject({
+            sender_name: 'Stitt, Nathan',
+            sender_email: 'nathan@stitt.org',
+        })
+    })
+
+    it('splits an unquoted name from a bracketed address', () => {
+        expect(sender('Nathan Stitt <nathan@stitt.org>')).toMatchObject({
+            sender_name: 'Nathan Stitt',
+            sender_email: 'nathan@stitt.org',
+        })
     })
 })

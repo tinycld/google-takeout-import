@@ -12,15 +12,6 @@ import type { ImportContext, ImportService, TakeoutDetection, TakeoutFile } from
 // like native. Both platform files are kept only for Metro's platform-suffix
 // resolution and behave identically.
 
-const SERVICE_FOR_RECORD: Record<string, ImportService> = {
-    contact: 'contacts',
-    calendar: 'calendar',
-    calendar_event: 'calendar',
-    drive_folder: 'drive',
-    drive_file: 'drive',
-    mail_thread: 'mail',
-}
-
 export async function detect(
     files: TakeoutFile[],
     _context: ImportContext
@@ -49,10 +40,8 @@ async function runOnMainThread(
     const inserter = createBatchInserter({
         pb,
         context,
-        onProgress: (recordType, update) => {
-            const svc = SERVICE_FOR_RECORD[recordType]
-            if (svc) useTakeoutImportStore.getState().updateProgress(svc, update)
-        },
+        onProgress: (service, update) =>
+            useTakeoutImportStore.getState().updateProgress(service, update),
         cancelSignal: () => useTakeoutImportStore.getState().cancelRequested,
         onException: captureException,
     })

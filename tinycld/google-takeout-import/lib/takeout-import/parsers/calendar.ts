@@ -1,57 +1,68 @@
 import ICAL from 'ical.js'
-import type { EventGuest, ParsedCalendar, ParsedCalendarEvent } from '../types'
+import {
+    type EventGuest,
+    type ParsedCalendar,
+    type ParsedCalendarEvent,
+    type ParsedUnreadable,
+    unreadable,
+} from '../types'
 
 /** True for entry paths the calendar importer owns. */
 export function isCalendarPath(path: string): boolean {
     return path.includes('Calendar/') && path.endsWith('.ics')
 }
 
-/** Parse a single `.ics` entry's bytes into a calendar (or null when empty). */
-export function parseCalendarEntry(path: string, data: Uint8Array): ParsedCalendar | null {
-    const cal = parseIcsText(new TextDecoder().decode(data), path)
-    if (cal && cal.events.length > 0) return cal
-    return null
+export interface CalendarEntryResult {
+    /** null when the file holds no importable events. */
+    calendar: ParsedCalendar | null
+    unreadable: ParsedUnreadable[]
 }
 
-export function parseCalendars(entries: Map<string, Uint8Array>): ParsedCalendar[] {
-    const calendars: ParsedCalendar[] = []
-
-    for (const [path, data] of entries) {
-        if (!isCalendarPath(path)) continue
-        const cal = parseCalendarEntry(path, data)
-        if (cal) calendars.push(cal)
-    }
-
-    return calendars
-}
-
-function parseIcsText(text: string, path: string): ParsedCalendar | null {
+/** Parse a single `.ics` entry's bytes into a calendar plus any unreadable items. */
+export function parseCalendarEntry(path: string, data: Uint8Array): CalendarEntryResult {
+    const file = path.split('/').pop() || path
     let parsed: ReturnType<typeof ICAL.parse>
     try {
-        parsed = ICAL.parse(text)
-    } catch {
-        return null
+        parsed = ICAL.parse(new TextDecoder().decode(data))
+    } catch (err) {
+        const detail = err instanceof Error ? `: ${err.message}` : ''
+        return {
+            calendar: null,
+            unreadable: [
+                unreadable('calendar', `Calendar file ${file} could not be read${detail}`),
+            ],
+        }
     }
 
     const vcalendar = new ICAL.Component(parsed)
-
     const calendarName =
         (vcalendar.getFirstPropertyValue('x-wr-calname') as string) ||
-        path.split('/').pop()?.replace('.ics', '') ||
+        file.replace('.ics', '') ||
         'Imported'
 
-    const vevents = vcalendar.getAllSubcomponents('vevent')
     const events: ParsedCalendarEvent[] = []
-
-    for (const vevent of vevents) {
+    const failures: ParsedUnreadable[] = []
+    for (const vevent of vcalendar.getAllSubcomponents('vevent')) {
         const event = parseEvent(vevent, calendarName)
-        if (event) events.push(event)
+        if (event.recordType === 'calendar_event') events.push(event)
+        else failures.push(event)
     }
 
-    return { recordType: 'calendar', name: calendarName, events }
+    const calendar: ParsedCalendar | null =
+        events.length > 0 ? { recordType: 'calendar', name: calendarName, events } : null
+    return { calendar, unreadable: failures }
 }
 
-function parseEvent(vevent: ICAL.Component, calendarName: string): ParsedCalendarEvent | null {
+/** Number of events in an entry, readable or not — the total the import reports against. */
+export function countCalendarEntry(path: string, data: Uint8Array): number {
+    const { calendar, unreadable: failures } = parseCalendarEntry(path, data)
+    return (calendar?.events.length ?? 0) + failures.length
+}
+
+function parseEvent(
+    vevent: ICAL.Component,
+    calendarName: string
+): ParsedCalendarEvent | ParsedUnreadable {
     const summary = (vevent.getFirstPropertyValue('summary') as string) || ''
     const description = (vevent.getFirstPropertyValue('description') as string) || ''
     const location = (vevent.getFirstPropertyValue('location') as string) || ''
@@ -62,8 +73,12 @@ function parseEvent(vevent: ICAL.Component, calendarName: string): ParsedCalenda
     const dtstart = vevent.getFirstPropertyValue('dtstart') as ICAL.Time | null
     const dtend = vevent.getFirstPropertyValue('dtend') as ICAL.Time | null
 
-    if (!dtstart) return null
-    if (!summary && !uid) return null
+    // start is required. An event with no title or UID still imports: the
+    // inserter supplies "(No title)" and a fresh UID.
+    if (!dtstart) {
+        const label = summary ? `"${summary}"` : uid ? `with UID ${uid}` : 'with no title'
+        return unreadable('calendar', `Event ${label} in ${calendarName} has no start time`)
+    }
 
     const allDay = dtstart.isDate
     const start = dtstart.toJSDate().toISOString()

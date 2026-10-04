@@ -1,17 +1,20 @@
 // biome-ignore-all lint/plugin/pbtsdb-no-raw-pb-access: dedicated bulk importer — operates on a raw PocketBase handle passed in (BatchInserterOptions.pb), outside React/the optimistic store, doing batched create + existence-check reads with retry/cancel/progress. Every pb access here is intentional, like the seed scripts.
+import { log } from '@tinycld/core/lib/logger'
 import { newRecordId } from 'pbtsdb/core'
 import type PocketBase from 'pocketbase'
 import type {
     ImportContext,
     ImportProgress,
+    ImportService,
     ParsedCalendar,
     ParsedCalendarEvent,
     ParsedContact,
     ParsedDriveFile,
     ParsedDriveFolder,
     ParsedMailMessage,
-    ParsedMailThread,
+    ParsedMailMessageRecord,
     ParsedRecord,
+    ParsedUnreadable,
 } from './types'
 
 async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
@@ -34,7 +37,7 @@ function isNotFound(err: unknown): boolean {
 export interface BatchInserterOptions {
     pb: PocketBase
     context: ImportContext
-    onProgress: (service: string, update: Partial<ImportProgress>) => void
+    onProgress: (service: ImportService, update: Partial<ImportProgress>) => void
     cancelSignal?: () => boolean
     onException?: (context: string, err: unknown) => void
 }
@@ -53,47 +56,60 @@ export function createBatchInserter({
     const calendarIdMap = new Map<string, string>()
     const labelIdMap = new Map<string, string>()
 
+    function reportFailure(service: ImportService, reason: string, count: number) {
+        onProgress(service, { errors: count, errorMessages: [reason] })
+    }
+
+    function reportUnreadable(service: ImportService, reason: string) {
+        reportFailure(service, reason, 1)
+        log.warn('takeout-import.unreadable', reason, { service })
+    }
+
+    async function insertRecord(record: InsertableRecord): Promise<InsertOutcome> {
+        switch (record.recordType) {
+            case 'contact':
+                return insertContact(record)
+            case 'calendar':
+                return insertCalendar(record)
+            case 'calendar_event':
+                return insertCalendarEvent(record)
+            case 'drive_folder':
+                return insertDriveFolder(record)
+            case 'drive_file':
+                return insertDriveFile(record)
+            case 'mail_message':
+                return insertMailRecord(record)
+        }
+    }
+
     async function insertRecords(records: ParsedRecord[]) {
         for (const record of records) {
             if (isCancelled()) return
+            if (record.recordType === 'unreadable') {
+                reportUnreadable(record.service, record.reason)
+                continue
+            }
+            const service = SERVICE_FOR_RECORD[record.recordType]
+            const units = progressUnits(record)
             try {
-                switch (record.recordType) {
-                    case 'contact':
-                        await insertContact(record)
-                        break
-                    case 'calendar':
-                        await insertCalendar(record)
-                        break
-                    case 'calendar_event':
-                        await insertCalendarEvent(record)
-                        break
-                    case 'drive_folder':
-                        await insertDriveFolder(record)
-                        break
-                    case 'drive_file':
-                        await insertDriveFile(record)
-                        break
-                    case 'mail_thread':
-                        await insertMailThread(record)
-                        break
-                }
-                onProgress(record.recordType, { imported: 1 })
+                const outcome = await insertRecord(record)
+                if (units > 0) onProgress(service, { [outcome]: units })
+                for (const problem of partialProblems(record)) reportUnreadable(service, problem)
             } catch (err) {
                 const msg = err instanceof Error ? err.message : 'Unknown error'
-                onProgress(record.recordType, { errors: 1, errorMessages: [msg] })
+                reportFailure(service, msg, Math.max(units, 1))
                 onException?.('takeout-import', err)
             }
         }
     }
 
-    async function insertContact(contact: ParsedContact) {
+    async function insertContact(contact: ParsedContact): Promise<InsertOutcome> {
         if (contact.vcard_uid) {
             try {
                 await pb
                     .collection('contacts')
                     .getFirstListItem(pb.filter('vcard_uid = {:uid}', { uid: contact.vcard_uid }))
-                onProgress('contact', { skipped: 1, imported: -1 })
-                return
+                return 'skipped'
             } catch (err) {
                 if (!isNotFound(err)) throw err
                 // Not found — proceed to create
@@ -106,8 +122,7 @@ export function createBatchInserter({
                         owner: userId,
                     })
                 )
-                onProgress('contact', { skipped: 1, imported: -1 })
-                return
+                return 'skipped'
             } catch (err) {
                 if (!isNotFound(err)) throw err
                 // Not found — proceed to create
@@ -121,8 +136,7 @@ export function createBatchInserter({
                         owner: userId,
                     })
                 )
-                onProgress('contact', { skipped: 1, imported: -1 })
-                return
+                return 'skipped'
             } catch (err) {
                 if (!isNotFound(err)) throw err
                 // Not found — proceed to create
@@ -144,9 +158,10 @@ export function createBatchInserter({
                 owner: userId,
             })
         )
+        return 'imported'
     }
 
-    async function insertCalendar(cal: ParsedCalendar) {
+    async function insertCalendar(cal: ParsedCalendar): Promise<InsertOutcome> {
         const calName = cal.name || 'Imported Calendar'
 
         // Reuse an existing calendar with the same name.
@@ -162,8 +177,7 @@ export function createBatchInserter({
                 .collection('calendar_calendars')
                 .getFirstListItem(pb.filter('name = {:name}', { name: calName }))
             calendarIdMap.set(cal.name, existing.id)
-            onProgress('calendar', { skipped: 1, imported: -1 })
-            return
+            return 'skipped'
         } catch (err) {
             if (!isNotFound(err)) throw err
             // Not found — create
@@ -191,19 +205,23 @@ export function createBatchInserter({
                 await new Promise(r => setTimeout(r, 300))
             }
         }
+        return 'imported'
     }
 
-    async function insertCalendarEvent(event: ParsedCalendarEvent) {
+    async function insertCalendarEvent(event: ParsedCalendarEvent): Promise<InsertOutcome> {
         const calendarId = calendarIdMap.get(event.calendarName)
-        if (!calendarId) return
+        if (!calendarId) {
+            throw new Error(
+                `Calendar "${event.calendarName}" was not created, so event "${event.title || '(No title)'}" was not imported`
+            )
+        }
 
         if (event.ical_uid) {
             try {
                 await pb
                     .collection('calendar_events')
                     .getFirstListItem(pb.filter('ical_uid = {:uid}', { uid: event.ical_uid }))
-                onProgress('calendar_event', { skipped: 1, imported: -1 })
-                return
+                return 'skipped'
             } catch (err) {
                 if (!isNotFound(err)) throw err
                 // Not found — proceed to create
@@ -229,6 +247,7 @@ export function createBatchInserter({
                 visibility: event.visibility,
             })
         )
+        return 'imported'
     }
 
     async function isDriveDupe(name: string, parentId: string): Promise<boolean> {
@@ -246,11 +265,16 @@ export function createBatchInserter({
         }
     }
 
-    async function insertDriveFolder(folder: ParsedDriveFolder) {
-        if (folderIdMap.has(folder.path)) return
+    async function insertDriveFolder(folder: ParsedDriveFolder): Promise<InsertOutcome> {
+        if (folderIdMap.has(folder.path)) return 'skipped'
 
         const parentPath = folder.path.split('/').slice(0, -1).join('/')
-        const parentId = folderIdMap.get(parentPath) || ''
+        const parentId = parentPath ? folderIdMap.get(parentPath) : ''
+        if (parentId === undefined) {
+            throw new Error(
+                `Folder "${parentPath}" was not created, so folder "${folder.path}" was not imported`
+            )
+        }
 
         // Check for existing folder — reuse its ID for child resolution
         try {
@@ -261,8 +285,7 @@ export function createBatchInserter({
                 })
             )
             folderIdMap.set(folder.path, existing.id)
-            onProgress('drive_folder', { skipped: 1, imported: -1 })
-            return
+            return 'skipped'
         } catch (err) {
             if (!isNotFound(err)) throw err
             // Not found — create
@@ -279,26 +302,24 @@ export function createBatchInserter({
         formData.append('size', '0')
         formData.append('description', '')
 
+        // The drive server hook creates the owner drive_shares row in the same
+        // transaction as the item, keyed on created_by. A second insert here
+        // trips the (item, user, group) unique index.
         await withRetry(() => pb.collection('drive_items').create(formData))
         folderIdMap.set(folder.path, folderId)
-
-        await withRetry(() =>
-            pb.collection('drive_shares').create({
-                id: newRecordId(),
-                item: folderId,
-                user: userId,
-                role: 'owner',
-                created_by: userId,
-            })
-        )
+        return 'imported'
     }
 
-    async function insertDriveFile(file: ParsedDriveFile) {
-        const parentId = folderIdMap.get(file.parentPath) || ''
+    async function insertDriveFile(file: ParsedDriveFile): Promise<InsertOutcome> {
+        const parentId = file.parentPath ? folderIdMap.get(file.parentPath) : ''
+        if (parentId === undefined) {
+            throw new Error(
+                `Folder "${file.parentPath}" was not created, so "${file.name}" was not imported`
+            )
+        }
 
         if (await isDriveDupe(file.name, parentId)) {
-            onProgress('drive_file', { skipped: 1, imported: -1 })
-            return
+            return 'skipped'
         }
 
         const itemId = newRecordId()
@@ -317,16 +338,7 @@ export function createBatchInserter({
         formData.append('description', '')
 
         await withRetry(() => pb.collection('drive_items').create(formData))
-
-        await withRetry(() =>
-            pb.collection('drive_shares').create({
-                id: newRecordId(),
-                item: itemId,
-                user: userId,
-                role: 'owner',
-                created_by: userId,
-            })
-        )
+        return 'imported'
     }
 
     async function getOrCreateLabel(name: string): Promise<string> {
@@ -360,59 +372,47 @@ export function createBatchInserter({
         return labelId
     }
 
-    async function insertMailThread(thread: ParsedMailThread) {
-        if (!mailboxId) return
+    // Thread rows created so far, keyed by thread plan. A thread found to be
+    // imported already maps to SKIPPED_THREAD so its later messages skip too.
+    const threadIds = new Map<string, string>()
+    const SKIPPED_THREAD = ''
 
-        const firstMsg = thread.messages[0]
-        if (firstMsg?.message_id) {
+    async function startThread(record: ParsedMailMessageRecord): Promise<string> {
+        const { thread } = record
+        if (thread.earliestMessageId) {
             try {
                 await pb
                     .collection('mail_messages')
                     .getFirstListItem(
-                        pb.filter('message_id = {:mid}', { mid: firstMsg.message_id })
+                        pb.filter('message_id = {:mid}', { mid: thread.earliestMessageId })
                     )
-                onProgress('mail_thread', { skipped: 1, imported: -1 })
-                return
+                return SKIPPED_THREAD
             } catch (err) {
                 if (!isNotFound(err)) throw err
                 // Not found — proceed
             }
         }
 
-        const latestDate =
-            thread.messages.length > 0
-                ? thread.messages.reduce(
-                      (latest, m) => (m.date > latest ? m.date : latest),
-                      thread.messages[0].date
-                  )
-                : new Date().toISOString()
-
-        const participants = extractParticipants(thread.messages)
-
         const threadRecord = await withRetry(() =>
             pb.collection('mail_threads').create({
                 mailbox: mailboxId,
                 subject: thread.subject.slice(0, 998),
-                snippet: thread.snippet.slice(0, 300),
-                message_count: thread.messages.length,
-                latest_date: latestDate,
-                participants,
+                // The thread shows its earliest message's snippet; a thread
+                // started by a later message gets it when that one arrives.
+                snippet: record.isEarliest ? record.message.snippet.slice(0, 300) : '',
+                message_count: thread.messageCount,
+                latest_date: thread.latestDate,
+                participants: thread.participants,
             })
         )
-
-        let prevMessageId = ''
-        for (const msg of thread.messages) {
-            await insertMailMessage(threadRecord.id, msg, prevMessageId)
-            prevMessageId = msg.message_id
-        }
 
         const threadState = await withRetry(() =>
             pb.collection('mail_thread_state').create({
                 thread: threadRecord.id,
                 user: userId,
                 folder: thread.folder,
-                is_read: thread.is_read,
-                is_starred: thread.is_starred,
+                is_read: thread.isRead,
+                is_starred: thread.isStarred,
             })
         )
 
@@ -427,13 +427,33 @@ export function createBatchInserter({
                 })
             )
         }
+        return threadRecord.id
     }
 
-    async function insertMailMessage(
-        threadId: string,
-        msg: ParsedMailMessage,
-        inReplyToOverride: string
-    ) {
+    async function insertMailRecord(record: ParsedMailMessageRecord): Promise<InsertOutcome> {
+        if (!mailboxId) throw new Error('No mailbox to import mail into')
+
+        let threadId = threadIds.get(record.thread.key)
+        const isThreadStart = threadId === undefined
+        if (threadId === undefined) {
+            threadId = await startThread(record)
+            threadIds.set(record.thread.key, threadId)
+        }
+        if (threadId === SKIPPED_THREAD) return 'skipped'
+
+        await insertMailMessage(threadId, record.message)
+        if (record.isEarliest && !isThreadStart) {
+            const id = threadId
+            await withRetry(() =>
+                pb
+                    .collection('mail_threads')
+                    .update(id, { snippet: record.message.snippet.slice(0, 300) })
+            )
+        }
+        return 'imported'
+    }
+
+    async function insertMailMessage(threadId: string, msg: ParsedMailMessage) {
         const formData = new FormData()
         formData.append('thread', threadId)
         formData.append('sender_name', msg.sender_name)
@@ -446,9 +466,8 @@ export function createBatchInserter({
         formData.append('has_attachments', String(msg.has_attachments))
         formData.append('message_id', msg.message_id)
 
-        const replyTo = msg.in_reply_to || inReplyToOverride
-        if (replyTo) {
-            formData.append('in_reply_to', replyTo)
+        if (msg.in_reply_to) {
+            formData.append('in_reply_to', msg.in_reply_to)
         }
 
         const htmlBlob = new File([msg.body_html || '<p></p>'], 'body.html', {
@@ -468,22 +487,28 @@ export function createBatchInserter({
     return { insertRecords }
 }
 
-function extractParticipants(messages: ParsedMailMessage[]): { name: string; email: string }[] {
-    const seen = new Set<string>()
-    const participants: { name: string; email: string }[] = []
+type InsertableRecord = Exclude<ParsedRecord, ParsedUnreadable>
+type InsertOutcome = 'imported' | 'skipped'
 
-    for (const msg of messages) {
-        const all = [
-            { name: msg.sender_name, email: msg.sender_email },
-            ...msg.recipients_to,
-            ...msg.recipients_cc,
-        ]
-        for (const p of all) {
-            if (!p.email || seen.has(p.email)) continue
-            seen.add(p.email)
-            participants.push({ name: p.name, email: p.email })
-        }
-    }
+const SERVICE_FOR_RECORD: Record<InsertableRecord['recordType'], ImportService> = {
+    contact: 'contacts',
+    calendar: 'calendar',
+    calendar_event: 'calendar',
+    drive_folder: 'drive',
+    drive_file: 'drive',
+    mail_message: 'mail',
+}
 
-    return participants
+// Progress is counted in the units the detection totals use: a calendar
+// container counts for nothing, since its events carry the count.
+function progressUnits(record: InsertableRecord): number {
+    return record.recordType === 'calendar' ? 0 : 1
+}
+
+// Parts of an imported record that could not be carried over, such as a
+// corrupt attachment on a message that otherwise imported.
+function partialProblems(record: InsertableRecord): string[] {
+    if (record.recordType !== 'mail_message') return []
+    const { message } = record
+    return message.problems.map(problem => `"${message.subject || '(No Subject)'}": ${problem}`)
 }
