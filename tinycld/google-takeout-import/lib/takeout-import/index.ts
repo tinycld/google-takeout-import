@@ -9,6 +9,7 @@ import { Platform } from 'react-native'
 import { importFinishedNotice } from './import-notice'
 import { recordImportFinished } from './record-import-finished'
 import * as runImportImpl from './run-import'
+import { nativeTakeoutFile, webTakeoutFile } from './takeout-file'
 import type { ImportContext, ImportService, TakeoutFile } from './types'
 
 // This package's accountSettings panel (see manifest.ts).
@@ -16,27 +17,12 @@ const IMPORT_SCREEN_HREF = appHref('settings/account/google-takeout-import/googl
 
 export { useTakeoutImportStore } from '@tinycld/core/lib/stores/takeout-import-store'
 
-// Selected files live at module scope rather than in the zustand store: on
-// native they are lazy TakeoutFile wrappers around picker URIs, not the DOM
-// Files the store's `files` field is typed as, and nothing renders the list
+// Selected files live at module scope rather than in the zustand store: they
+// are range-reading TakeoutFile wrappers, not the DOM Files the store's `files`
+// field is typed as, and nothing renders the list
 // so no reactivity is lost. Entries left behind by a store reset are
 // unreachable — Start Import only appears after a new selection replaces them.
 let selectedFiles: TakeoutFile[] = []
-
-// Wraps a picked document so the import pipeline can read its bytes on
-// demand, like a web File. expo-file-system is imported lazily so this
-// module stays loadable in vitest's node environment (same pattern as
-// drive's save-to-drive).
-function nativeTakeoutFile(asset: DocumentPicker.DocumentPickerAsset): TakeoutFile {
-    return {
-        name: asset.name,
-        arrayBuffer: async () => {
-            const { File: FsFile } = await import('expo-file-system')
-            const bytes = await new FsFile(asset.uri).bytes()
-            return bytes.buffer
-        },
-    }
-}
 
 export function useTakeoutImport(context: ImportContext) {
     const store = useTakeoutImportStore()
@@ -73,7 +59,7 @@ export function useTakeoutImport(context: ImportContext) {
             input.accept = '.zip'
             input.onchange = () => {
                 if (input.files?.length) {
-                    const files = Array.from(input.files)
+                    const files = Array.from(input.files).map(webTakeoutFile)
                     selectedFiles = files
                     detect(files)
                 }
@@ -86,7 +72,9 @@ export function useTakeoutImport(context: ImportContext) {
             })
                 .then(result => {
                     if (result.canceled) return
-                    const files = result.assets.map(nativeTakeoutFile)
+                    const files = result.assets.map(asset =>
+                        nativeTakeoutFile(asset.uri, asset.name)
+                    )
                     selectedFiles = files
                     detect(files)
                 })

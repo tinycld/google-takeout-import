@@ -71,21 +71,21 @@ test.describe('Google Takeout Import', () => {
 
         // Upload files again (serial tests share login but not page state)
         const fileChooserPromise = page.waitForEvent('filechooser')
-        await page.getByText('Select Takeout Files').click()
+        await page.getByText('Select Takeout files').click()
         const fileChooser = await fileChooserPromise
         await fileChooser.setFiles(TAKEOUT_FILES)
 
         // Detection reads all three zips in the browser before enabling the
         // button — slow on CI, so it shares the import budget.
-        await expect(page.getByText('Start Import')).toBeVisible({
+        await expect(page.getByText('Start import')).toBeVisible({
             timeout: IMPORT_COMPLETE_TIMEOUT,
         })
-        await page.getByText('Start Import').click()
+        await page.getByText('Start import').click()
 
-        await expect(page.getByText('Import Complete', { exact: true })).toBeVisible({
+        await expect(page.getByText('Import complete', { exact: true })).toBeVisible({
             timeout: IMPORT_COMPLETE_TIMEOUT,
         })
-        await expect(page.getByText(/records imported/)).toBeVisible()
+        await expect(page.getByText(/items? imported/)).toBeVisible()
     })
 
     test('verify contacts were imported', async ({ page }) => {

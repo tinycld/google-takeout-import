@@ -24,7 +24,7 @@ A skipped item is **left exactly as it is** in TinyCld. If you edited an importe
 
 ## Picking up after a cancel or a partial run
 
-If you cancelled, hit the size limit, or lost the connection, simply run the import again with the same files. Everything written the first time is skipped and the run continues with what was missing. This is also how to import a large export in stages: select some of the numbered parts, import, then **Import More** with the rest — see [Importing from Google](help://google-takeout-import:importing-from-google).
+If you cancelled, hit the size limit, or lost the connection, simply run the import again with the same files. Everything written the first time is skipped and the run continues with what was missing. This is also how to import a large export in stages: select some of the numbered parts, import, then **Import more files** with the rest — see [Importing from Google](help://google-takeout-import:importing-from-google).
 
 ## Services that are greyed out
 

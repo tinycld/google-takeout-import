@@ -1,47 +1,49 @@
 import ICAL from 'ical.js'
-import type { ParsedContact } from '../types'
+import { type ParsedContact, type ParsedUnreadable, unreadable } from '../types'
 
 /** True for entry paths the contacts importer owns. */
 export function isContactsPath(path: string): boolean {
     return path.includes('Contacts/') && path.endsWith('.vcf')
 }
 
+type ContactResult = ParsedContact | ParsedUnreadable
+
 /** Parse the contacts in a single `.vcf` entry's bytes. */
-export function parseContactsEntry(data: Uint8Array): ParsedContact[] {
-    return parseVcfText(new TextDecoder().decode(data))
+export function parseContactsEntry(path: string, data: Uint8Array): ContactResult[] {
+    return parseVcfText(new TextDecoder().decode(data), fileName(path))
 }
 
-export function parseContacts(entries: Map<string, Uint8Array>): ParsedContact[] {
-    const contacts: ParsedContact[] = []
+export function parseContacts(entries: Map<string, Uint8Array>): ContactResult[] {
+    const contacts: ContactResult[] = []
 
     for (const [path, data] of entries) {
         if (!isContactsPath(path)) continue
-        contacts.push(...parseContactsEntry(data))
+        contacts.push(...parseContactsEntry(path, data))
     }
 
     return contacts
 }
 
-function parseVcfText(text: string): ParsedContact[] {
-    const contacts: ParsedContact[] = []
+function fileName(path: string) {
+    return path.split('/').pop() || path
+}
+
+function parseVcfText(text: string, file: string): ContactResult[] {
     // Split on BEGIN:VCARD to handle multiple cards in one file
-    const cards = text.split(/(?=BEGIN:VCARD)/i)
-
-    for (const raw of cards) {
-        if (!raw.trim()) continue
-        const contact = parseOneVcard(raw.trim())
-        if (contact) contacts.push(contact)
-    }
-
-    return contacts
+    const cards = text
+        .split(/(?=BEGIN:VCARD)/i)
+        .map(raw => raw.trim())
+        .filter(Boolean)
+    return cards.map((raw, index) => parseOneVcard(raw, `card ${index + 1} in ${file}`))
 }
 
-function parseOneVcard(text: string): ParsedContact | null {
+function parseOneVcard(text: string, where: string): ContactResult {
     let parsed: ReturnType<typeof ICAL.parse>
     try {
         parsed = ICAL.parse(text)
-    } catch {
-        return null
+    } catch (err) {
+        const detail = err instanceof Error ? `: ${err.message}` : ''
+        return unreadable('contacts', `Contact ${where} could not be read${detail}`)
     }
 
     const vcard = new ICAL.Component(parsed)
@@ -75,7 +77,13 @@ function parseOneVcard(text: string): ParsedContact | null {
     const notes = (vcard.getFirstPropertyValue('note') as string) || ''
     const vcardUid = (vcard.getFirstPropertyValue('uid') as string) || ''
 
-    if (!firstName && !lastName && !email) return null
+    // first_name is required. A card with only a last name, or only an
+    // organization, email or phone, is still a contact worth keeping.
+    if (!firstName) {
+        firstName = lastName || fn || company || email || phone
+        if (firstName === lastName) lastName = ''
+    }
+    if (!firstName) return unreadable('contacts', `Contact ${where} is empty`)
 
     return {
         recordType: 'contact',
