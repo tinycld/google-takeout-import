@@ -34,10 +34,12 @@ describe('importFinishedNotice', () => {
         expect(notice.body).toBe('Import finished: Contacts, Calendar, Drive, Mail.')
     })
 
-    it('links to the takeout settings panel', () => {
+    // The panel is an account-settings panel; the org-panel catch-all at
+    // /a/settings/<pkg>/<panel> is admin-only and would 404 for members.
+    it('links to the account-settings takeout panel', () => {
         const notice = importFinishedNotice('user-1', ['mail'])
-        expect(notice.url).toBe(IMPORT_PANEL_HREF)
-        expect(notice.url).toBe('/a/settings/google-takeout-import/google-takeout')
+        expect(notice.url).toBe('/a/settings/account/google-takeout-import/google-takeout')
+        expect(IMPORT_PANEL_HREF).toBe('/a/settings/account/google-takeout-import/google-takeout')
     })
 
     it('records the imported services in metadata', () => {
