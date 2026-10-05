@@ -6,14 +6,14 @@ A feature package for the [tinycld](https://tinycld.org/) ecosystem. Lives as a 
 
 ## What it does
 
-Adds one screen, **Settings → Import from Google** (`/a/settings/google-takeout-import/google-takeout`). The user selects one or more Takeout `.zip` files, the package scans them and reports what it found per service, the user turns off anything they don't want, and **Start import** streams the records into the owning packages' collections with live per-service progress.
+Adds one screen, **Settings → Account → Import from Google** (`/a/settings/account/google-takeout-import/google-takeout`). The user selects one or more Takeout `.zip` files, the package scans them and reports what it found per service, the user turns off anything they don't want, and **Start import** streams the records into the owning packages' collections with live per-service progress.
 
 User-facing behavior:
 
 - **Multi-file selection** — Google splits a large export into numbered parts; all parts of one export are selected at once (`multiple: true`). On web the picker is a hidden `<input type="file" accept=".zip">`; on iOS/Android it is `expo-document-picker` with `type: ['application/zip']`, and each picked document is wrapped in a lazy `TakeoutFile` that reads its bytes from the URI through `expo-file-system` only when the pipeline asks.
-- **Detection before commit** — the zip directories are read and only the small metadata artifacts (`.vcf`, `.ics`, `.mbox`) are decompressed to count contacts, events, and messages; Drive files are counted from entry names alone. The detection screen shows one row per service with a toggle and a count (`— 1,234 contacts`).
-- **Package-presence gating** — a service is offered only if the owning package is installed, read from the runtime registry (`usePackages()`), never from a hard import. On a deployment without `drive`, Drive files in the archive are simply greyed out.
-- **Mailbox prerequisite** — mail lands in the user's default mailbox (`useDefaultMailbox`, the first `mail_mailbox_members` row where `user` is the current user). If Mail is detected but no mailbox resolves, the row is disabled and the screen says *"Mail was found but you don't have a mailbox set up."* Start is also held while the mailbox lookup is still in flight so a mail import can never launch with a null mailbox; `runFallbackImport` re-checks this (Guard B) and throws rather than silently importing zero threads.
+- **Detection before commit** — the zip directories are read and only the small metadata artifacts (`.vcf`, `.ics`, `.mbox`) are decompressed to count contacts, events, and messages; Drive files are counted from entry names alone. The detection screen shows one row per service with a toggle and a count (`1,234 contacts`). A row that cannot import says why: *Not in these files*, *Not installed on this server*, *Set up a mailbox first*, or *Checking your mailbox…*.
+- **Package-presence gating** — a service is offered only if the owning package is installed, read from the runtime registry (`usePackages()`), never from a hard import. On a deployment without `drive`, the Drive row is disabled and says *Not installed on this server*.
+- **Mailbox prerequisite** — mail lands in the user's default mailbox (`useDefaultMailbox`, the first `mail_mailbox_members` row where `user` is the current user). If Mail is detected but no mailbox resolves, the row is disabled with *Set up a mailbox first* and the screen says *"This export has mail, but you have no mailbox. Create or join one in Mail settings, then come back. Your files stay selected."* Start is also held while the mailbox lookup is still in flight so a mail import can never launch with a null mailbox; `runFallbackImport` re-checks this (Guard B) and throws rather than silently importing zero threads.
 - **Progress, cancel, and errors** — one row per active service (`Reading archive…` → `NN%` → check mark, with imported / skipped counts and a progress bar). Per-record failures are recorded and the run continues; an *N items failed* disclosure lists the first 20 messages and summarises the rest. **Cancel import** stops at the next record and leaves already-written records in place; the screen returns to the detection view so the same selection can be started again. Whole-run failures (unreadable zip, over the size limit, mail with no mailbox) show **Import failed** with **Try again**.
 - **Completion** — *Import complete — N items imported · N already here · N errors* with **Import more files**, which resets the store to the file-select state. A finished run also writes one `import-finished` notice into core `notifications` (`recordImportFinished` in `lib/takeout-import/record-import-finished.ts`, payload from `import-notice.ts`) linking back to this screen; a failed notice write is logged and never turns the completed import into an error.
 - **Idempotent re-runs** — every record type is deduplicated against what already exists (see below). A re-import of the same archive, or of a later export of the same account, adds only new items. An existing record is **skipped, never updated**.
@@ -22,7 +22,7 @@ Runs on web and native identically: the import used to run in a Web Worker on we
 
 ## How it plugs in
 
-This is a **settings-only package**. The manifest declares no routes, nav entry, sidebar, migrations, collections, or Go server — `tests/manifest.test.ts` asserts exactly that:
+This is a **settings-only package**. The manifest declares one `accountSettings` panel and nothing else — `tests/manifest.test.ts` asserts that `accountSettings` is present and that `settings`, `routes`, `nav`, `server`, and `setupSteps` are absent:
 
 ```ts
 const manifest = {
@@ -30,7 +30,7 @@ const manifest = {
     slug: 'google-takeout-import',
     version: '…',  // see package.json — the single source of truth
     description: 'Import data from Google Takeout .zip files.',
-    settings: [
+    accountSettings: [
         { slug: 'google-takeout', component: 'settings/takeout', label: 'Import from Google' },
     ],
     help: { directory: 'help' },
@@ -39,7 +39,7 @@ const manifest = {
 }
 ```
 
-The `settings` entry is what the generator turns into the Settings sidebar item; `component` resolves through the `exports` map in `package.json`:
+The `accountSettings` entry is a per-user panel in the **Account** group of Settings, open to every role (an org `settings` panel is admin-only). The generator turns it into the sidebar item; `component` resolves through the `exports` map in `package.json`:
 
 ```json
 "exports": {
@@ -142,9 +142,12 @@ The calendar-name, `ical_uid`, and `message_id` lookups are deliberately unscope
 
 ```
 tests/
-    manifest.test.ts                       settings-only contract (no routes / nav / server)
+    manifest.test.ts                       account-settings-only contract (no settings / routes / nav /
+                                           server / setupSteps)
     import-notice.test.ts                  import-finished notice payload: user, package / type constants, title,
-                                           body labels, and the settings-screen href
+                                           body labels, and the account-settings panel href
+    import-view.test.ts                    step derivation, choice rows (availability + detail text), progress
+                                           and completion summaries
     service-labels.test.ts                 SERVICE_LABELS covers every ImportService and feeds the notice body
     record-import-finished.test.ts         recordImportFinished resolves on success and on failure (one warn)
     batch-inserter-schema.test.ts          mirrored-schema contract (below)
@@ -156,6 +159,7 @@ tests/
     mbox-splitter.test.ts                  separators found at every chunk boundary, preamble reported
     unreadable-items.test.ts               every unparseable item is reported, never dropped
     useDefaultMailbox.test.tsx             loading state + asserts the `user` filter field by name
+    helpers/takeout-file.ts                in-memory TakeoutFile that records every range read (unit tests)
     takeout-import.spec.ts                 Playwright: full import of the fixtures, then verifies each
                                            service's data through the owning package's UI
     assets/takeout/*.zip                   three real Takeout parts: Contacts+Calendar, Drive, Mail
@@ -168,16 +172,21 @@ tinycld/google-takeout-import/lib/takeout-import/parsers/
 ## Client package layout
 
 ```
-manifest.ts                     settings entry, help directory, peerVersions
+manifest.ts                     accountSettings entry, help directory, peerVersions
 help/                           in-app help topics (markdown + frontmatter)
 tinycld/google-takeout-import/
     types.ts                    ImportService (local declaration, not a re-export)
-    settings/takeout.tsx        settings panel → GoogleTakeoutImportSection
+    settings/takeout.tsx        account-settings panel → GoogleTakeoutImportSection
     components/
-        GoogleTakeoutImportSection.tsx   the six states: idle / detecting / detected / importing / complete / error
+        GoogleTakeoutImportSection.tsx   shell: intro line, help icon, stepper, and the active panel
+        ImportSteps.tsx         files / services / import / finished stepper
+        TakeoutPanels.tsx       ChooseFiles / Scanning / Choice / Progress / Complete / Failed panels
+        ServiceRow.tsx          one service row: toggle, count or reason, progress, error disclosure
     hooks/
+        useTakeoutSection.ts    joins the store, detection, mailbox, and installed packages for the panels
         useDefaultMailbox.ts    first mail_mailbox_members row for the user (raw pb read; mail may be absent)
         useInstalledSlugs.ts    memoized Set of installed package slugs from usePackages() (presence gating)
+    lib/import-view.ts          pure view helpers: current step, choice rows + availability text, summaries
     lib/service-labels.ts       SERVICE_LABELS: one display label per ImportService (UI + notice body)
     lib/takeout-import/
         index.ts                useTakeoutImport: pickers, detect, start, cancel, import-finished notice
@@ -226,7 +235,7 @@ These scripts delegate to `tinycld-pkg` (the `@tinycld/package-scripts` workspac
 
 ## Package anatomy
 
-- `manifest.ts` — settings entry, `help` directory, `peerVersions`
+- `manifest.ts` — `accountSettings` entry, `help` directory, `peerVersions`
 - `package.json` — name, exports map, `fflate` / `ical.js` peer deps
 - `tsconfig.json` — typecheck config (extends core's `tinycld/core/tsconfig.package-base.json`)
 - `help/` — in-app help topics (markdown + frontmatter)
