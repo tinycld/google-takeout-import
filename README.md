@@ -104,7 +104,7 @@ The inserter writes into collections owned by four other packages plus core. It 
 | Calendar | `calendar_calendars` | `id`, `name`, `color: 'blue'` | membership is created by calendar's server hook; the inserter polls `calendar_events` until the new calendar is visible through the rule context before inserting into it |
 | | `calendar_events` | `id`, `calendar`, `title`, `description`, `location`, `start`, `end`, `all_day`, `recurrence`, `ical_uid`, `guests`, `reminder`, `busy_status`, `visibility` | `created_by = userId` |
 | Drive | `drive_items` | folders first (`is_folder: true`, `size: 0`), then files as multipart with the `file` blob; `parent` resolved from the folder map | `created_by = userId` |
-| | `drive_shares` | one `role: 'owner'` share per created item | `user = userId` |
+| | `drive_shares` | not written by the inserter — drive's server hook creates the `role: 'owner'` share for each item in the same transaction, keyed on `created_by` | `user = userId` |
 | Mail | `mail_threads` | `mailbox`, `subject`, `snippet`, `message_count`, `latest_date`, `participants` | scoped by the default `mailbox` |
 | | `mail_messages` | multipart: headers, `recipients_to` / `recipients_cc` as JSON, `body_html` as an uploaded `body.html` file, each attachment under `attachments`, `in_reply_to` chained to the previous message when the header is absent | |
 | | `mail_thread_state` | `thread`, `folder`, `is_read`, `is_starred` | `user = userId` |
@@ -136,7 +136,7 @@ The calendar-name, `ical_uid`, and `message_id` lookups are deliberately unscope
 - **Batches of 50** records per service sink, with a `setTimeout(0)` yield after each flush so the UI stays responsive on the main thread.
 - **One retry** after 1 s on every `create`.
 - **Field truncation** to the owning schemas' limits: contact names 100, company / title 200, `vcard_uid` 255; event title / location / recurrence / `ical_uid` 500, description 5000; mail subject 998, snippet 300.
-- **Error list** in the UI is capped at 20 messages plus an *…and N more* line; the counts are always complete.
+- **Error list** in the UI is capped at 20 messages plus an *and N more* line; the counts are always complete.
 
 ## Tests
 
