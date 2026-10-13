@@ -1,4 +1,3 @@
-import { captureException } from '@tinycld/core/lib/errors'
 import { pb } from '@tinycld/core/lib/pocketbase'
 import { useTakeoutImportStore } from '@tinycld/core/lib/stores/takeout-import-store'
 import { createBatchInserter } from './batch-inserter'
@@ -40,7 +39,6 @@ async function runOnMainThread(
         onProgress: (service, update) =>
             useTakeoutImportStore.getState().updateProgress(service, update),
         cancelSignal: () => useTakeoutImportStore.getState().cancelRequested,
-        onException: captureException,
     })
 
     await runFallbackImport(files, services, context, {

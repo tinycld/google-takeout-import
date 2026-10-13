@@ -1,11 +1,13 @@
 // biome-ignore-all lint/plugin/pbtsdb-no-raw-pb-access: dedicated bulk importer — operates on a raw PocketBase handle passed in (BatchInserterOptions.pb), outside React/the optimistic store, doing batched create + existence-check reads with retry/cancel/progress. Every pb access here is intentional, like the seed scripts.
-import { log } from '@tinycld/core/lib/logger'
 import { newRecordId } from 'pbtsdb/core'
 import type PocketBase from 'pocketbase'
+import { describeFailure } from './describe-failure'
+import { asHtmlDocument } from './html-document'
 import type {
     ImportContext,
     ImportProgress,
     ImportService,
+    MailThreadPlan,
     ParsedCalendar,
     ParsedCalendarEvent,
     ParsedContact,
@@ -20,10 +22,19 @@ import type {
 async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
     try {
         return await fn()
-    } catch {
+    } catch (err) {
+        if (isRejectedRequest(err)) throw err
         await new Promise(r => setTimeout(r, 1000))
         return fn()
     }
+}
+
+// The server refused the request itself (validation, permissions), so sending
+// the same payload again gets the same answer. 429 is the exception: it asks
+// for a later retry.
+function isRejectedRequest(err: unknown): boolean {
+    const status = (err as { status?: number } | null)?.status ?? 0
+    return status >= 400 && status < 500 && status !== 429
 }
 
 // Dedup lookups may treat ONLY a 404 as "not found — create it". Any other
@@ -39,7 +50,6 @@ export interface BatchInserterOptions {
     context: ImportContext
     onProgress: (service: ImportService, update: Partial<ImportProgress>) => void
     cancelSignal?: () => boolean
-    onException?: (context: string, err: unknown) => void
 }
 
 export function createBatchInserter({
@@ -47,7 +57,6 @@ export function createBatchInserter({
     context,
     onProgress,
     cancelSignal,
-    onException,
 }: BatchInserterOptions) {
     const isCancelled = () => cancelSignal?.() === true
     const { userId, mailboxId } = context
@@ -62,7 +71,6 @@ export function createBatchInserter({
 
     function reportUnreadable(service: ImportService, reason: string) {
         reportFailure(service, reason, 1)
-        log.warn('takeout-import.unreadable', reason, { service })
     }
 
     async function insertRecord(record: InsertableRecord): Promise<InsertOutcome> {
@@ -96,9 +104,11 @@ export function createBatchInserter({
                 if (units > 0) onProgress(service, { [outcome]: units })
                 for (const problem of partialProblems(record)) reportUnreadable(service, problem)
             } catch (err) {
-                const msg = err instanceof Error ? err.message : 'Unknown error'
-                reportFailure(service, msg, Math.max(units, 1))
-                onException?.('takeout-import', err)
+                // A failed item is reported to the user in the import panel,
+                // not to Sentry: it is a problem with their data, not an app
+                // fault, and a large mailbox can fail thousands of items.
+                const reason = `${recordLabel(record)}: ${describeFailure(err)}`
+                reportFailure(service, reason, Math.max(units, 1))
             }
         }
     }
@@ -211,9 +221,7 @@ export function createBatchInserter({
     async function insertCalendarEvent(event: ParsedCalendarEvent): Promise<InsertOutcome> {
         const calendarId = calendarIdMap.get(event.calendarName)
         if (!calendarId) {
-            throw new Error(
-                `Calendar "${event.calendarName}" was not created, so event "${event.title || '(No title)'}" was not imported`
-            )
+            throw new Error(`Not imported because calendar "${event.calendarName}" was not created`)
         }
 
         if (event.ical_uid) {
@@ -271,9 +279,7 @@ export function createBatchInserter({
         const parentPath = folder.path.split('/').slice(0, -1).join('/')
         const parentId = parentPath ? folderIdMap.get(parentPath) : ''
         if (parentId === undefined) {
-            throw new Error(
-                `Folder "${parentPath}" was not created, so folder "${folder.path}" was not imported`
-            )
+            throw new Error(`Not imported because folder "${parentPath}" was not created`)
         }
 
         // Check for existing folder — reuse its ID for child resolution
@@ -313,9 +319,7 @@ export function createBatchInserter({
     async function insertDriveFile(file: ParsedDriveFile): Promise<InsertOutcome> {
         const parentId = file.parentPath ? folderIdMap.get(file.parentPath) : ''
         if (parentId === undefined) {
-            throw new Error(
-                `Folder "${file.parentPath}" was not created, so "${file.name}" was not imported`
-            )
+            throw new Error(`Not imported because folder "${file.parentPath}" was not created`)
         }
 
         if (await isDriveDupe(file.name, parentId)) {
@@ -372,31 +376,66 @@ export function createBatchInserter({
         return labelId
     }
 
-    // Thread rows created so far, keyed by thread plan. A thread found to be
-    // imported already maps to SKIPPED_THREAD so its later messages skip too.
-    const threadIds = new Map<string, string>()
-    const SKIPPED_THREAD = ''
+    // The thread each plan resolved to in this run. `reused` marks a thread an
+    // earlier import made, which may already hold some of the messages.
+    const threads = new Map<string, ResolvedThread>()
+    const claimedThreadIds = new Set<string>()
 
-    async function startThread(record: ParsedMailMessageRecord): Promise<string> {
-        const { thread } = record
-        if (thread.earliestMessageId) {
-            try {
-                await pb
-                    .collection('mail_messages')
-                    .getFirstListItem(
-                        pb.filter('message_id = {:mid}', { mid: thread.earliestMessageId })
-                    )
-                return SKIPPED_THREAD
-            } catch (err) {
-                if (!isNotFound(err)) throw err
-                // Not found — proceed
-            }
+    // An import can be run again after a partial failure, so the thread may
+    // exist already. It is found through any message of it that imported, or,
+    // when none did, as the empty thread the earlier run left behind.
+    async function findImportedThread(thread: MailThreadPlan): Promise<string | undefined> {
+        const messageIds = thread.messageIds.filter(Boolean)
+        for (let i = 0; i < messageIds.length; i += MESSAGE_ID_CHUNK) {
+            const params: Record<string, string | null> = { mailbox: mailboxId }
+            const terms = messageIds.slice(i, i + MESSAGE_ID_CHUNK).map((mid, n) => {
+                params[`m${n}`] = mid
+                return `message_id = {:m${n}}`
+            })
+            const found = await pb.collection('mail_messages').getList<{ thread: string }>(1, 1, {
+                filter: pb.filter(`thread.mailbox = {:mailbox} && (${terms.join(' || ')})`, params),
+            })
+            if (found.items[0]) return found.items[0].thread
         }
+        return findEmptyThread(thread)
+    }
 
+    async function findEmptyThread(thread: MailThreadPlan): Promise<string | undefined> {
+        const candidates = await pb
+            .collection('mail_threads')
+            .getList<{ id: string; latest_date: string }>(1, 50, {
+                filter: pb.filter('mailbox = {:mailbox} && subject = {:subject}', {
+                    mailbox: mailboxId,
+                    subject: threadSubject(thread),
+                }),
+            })
+        for (const candidate of candidates.items) {
+            if (claimedThreadIds.has(candidate.id)) continue
+            if (!isSameInstant(candidate.latest_date, thread.latestDate)) continue
+            const messages = await pb.collection('mail_messages').getList(1, 1, {
+                filter: pb.filter('thread = {:thread}', { thread: candidate.id }),
+            })
+            if (messages.items.length === 0) return candidate.id
+        }
+        return undefined
+    }
+
+    async function resolveThread(record: ParsedMailMessageRecord): Promise<ResolvedThread> {
+        const existingId = await findImportedThread(record.thread)
+        const resolved = existingId
+            ? { id: existingId, reused: true }
+            : { id: await createThread(record), reused: false }
+        await addThreadState(resolved, record.thread)
+        claimedThreadIds.add(resolved.id)
+        return resolved
+    }
+
+    async function createThread(record: ParsedMailMessageRecord): Promise<string> {
+        const { thread } = record
         const threadRecord = await withRetry(() =>
             pb.collection('mail_threads').create({
                 mailbox: mailboxId,
-                subject: thread.subject.slice(0, 998),
+                subject: threadSubject(thread),
                 // The thread shows its earliest message's snippet; a thread
                 // started by a later message gets it when that one arrives.
                 snippet: record.isEarliest ? record.message.snippet.slice(0, 300) : '',
@@ -405,45 +444,97 @@ export function createBatchInserter({
                 participants: thread.participants,
             })
         )
+        return threadRecord.id
+    }
 
-        const threadState = await withRetry(() =>
+    // A reused thread keeps the state and labels the earlier run gave it, and
+    // gets only the parts that run did not reach.
+    async function addThreadState(resolved: ResolvedThread, thread: MailThreadPlan) {
+        const existingStateId = resolved.reused ? await findThreadState(resolved.id) : undefined
+        const stateId = existingStateId ?? (await createThreadState(resolved.id, thread))
+
+        for (const labelName of thread.labels) {
+            const labelId = await getOrCreateLabel(labelName)
+            if (existingStateId && (await hasLabelAssignment(labelId, stateId))) continue
+            await withRetry(() =>
+                pb.collection('label_assignments').create({
+                    label: labelId,
+                    record_id: stateId,
+                    collection: 'mail_thread_state',
+                    user: userId,
+                })
+            )
+        }
+    }
+
+    async function findThreadState(threadId: string): Promise<string | undefined> {
+        const found = await pb.collection('mail_thread_state').getList(1, 1, {
+            filter: pb.filter('thread = {:thread} && user = {:user}', {
+                thread: threadId,
+                user: userId,
+            }),
+        })
+        return found.items[0]?.id
+    }
+
+    async function createThreadState(threadId: string, thread: MailThreadPlan): Promise<string> {
+        const state = await withRetry(() =>
             pb.collection('mail_thread_state').create({
-                thread: threadRecord.id,
+                thread: threadId,
                 user: userId,
                 folder: thread.folder,
                 is_read: thread.isRead,
                 is_starred: thread.isStarred,
             })
         )
+        return state.id
+    }
 
-        for (const labelName of thread.labels) {
-            const labelId = await getOrCreateLabel(labelName)
-            await withRetry(() =>
-                pb.collection('label_assignments').create({
-                    label: labelId,
-                    record_id: threadState.id,
-                    collection: 'mail_thread_state',
-                    user: userId,
-                })
-            )
+    async function hasLabelAssignment(labelId: string, stateId: string): Promise<boolean> {
+        const found = await pb.collection('label_assignments').getList(1, 1, {
+            filter: pb.filter('label = {:label} && record_id = {:record}', {
+                label: labelId,
+                record: stateId,
+            }),
+        })
+        return found.items.length > 0
+    }
+
+    // A message without a Message-ID is matched on sender, subject and date.
+    async function isMessageImported(threadId: string, msg: ParsedMailMessage): Promise<boolean> {
+        if (msg.message_id) {
+            const found = await pb.collection('mail_messages').getList(1, 1, {
+                filter: pb.filter('thread = {:thread} && message_id = {:mid}', {
+                    thread: threadId,
+                    mid: msg.message_id,
+                }),
+            })
+            return found.items.length > 0
         }
-        return threadRecord.id
+        const candidates = await pb.collection('mail_messages').getList<{ date: string }>(1, 50, {
+            filter: pb.filter(
+                'thread = {:thread} && sender_email = {:sender} && subject = {:subject}',
+                { thread: threadId, sender: msg.sender_email, subject: msg.subject.slice(0, 998) }
+            ),
+        })
+        return candidates.items.some(candidate => isSameInstant(candidate.date, msg.date))
     }
 
     async function insertMailRecord(record: ParsedMailMessageRecord): Promise<InsertOutcome> {
         if (!mailboxId) throw new Error('No mailbox to import mail into')
 
-        let threadId = threadIds.get(record.thread.key)
-        const isThreadStart = threadId === undefined
-        if (threadId === undefined) {
-            threadId = await startThread(record)
-            threadIds.set(record.thread.key, threadId)
+        let thread = threads.get(record.thread.key)
+        const isThreadStart = thread === undefined
+        if (thread === undefined) {
+            thread = await resolveThread(record)
+            threads.set(record.thread.key, thread)
         }
-        if (threadId === SKIPPED_THREAD) return 'skipped'
+        if (thread.reused && (await isMessageImported(thread.id, record.message))) return 'skipped'
 
-        await insertMailMessage(threadId, record.message)
-        if (record.isEarliest && !isThreadStart) {
-            const id = threadId
+        await insertMailMessage(thread.id, record.message)
+        const hasSnippet = isThreadStart && !thread.reused
+        if (record.isEarliest && !hasSnippet) {
+            const id = thread.id
             await withRetry(() =>
                 pb
                     .collection('mail_threads')
@@ -470,7 +561,7 @@ export function createBatchInserter({
             formData.append('in_reply_to', msg.in_reply_to)
         }
 
-        const htmlBlob = new File([msg.body_html || '<p></p>'], 'body.html', {
+        const htmlBlob = new File([asHtmlDocument(msg.body_html)], 'body.html', {
             type: 'text/html',
         })
         formData.append('body_html', htmlBlob)
@@ -490,6 +581,25 @@ export function createBatchInserter({
 type InsertableRecord = Exclude<ParsedRecord, ParsedUnreadable>
 type InsertOutcome = 'imported' | 'skipped'
 
+interface ResolvedThread {
+    id: string
+    reused: boolean
+}
+
+// Message-IDs per thread lookup, to keep the filter well under URL limits.
+const MESSAGE_ID_CHUNK = 25
+
+function threadSubject(thread: MailThreadPlan): string {
+    return thread.subject.slice(0, 998)
+}
+
+// PocketBase returns dates as "2024-01-29 17:34:35.000Z", not ISO 8601, so the
+// same instant can be written two ways.
+function isSameInstant(stored: string, parsed: string): boolean {
+    const time = Date.parse(stored.replace(' ', 'T'))
+    return !Number.isNaN(time) && time === Date.parse(parsed)
+}
+
 const SERVICE_FOR_RECORD: Record<InsertableRecord['recordType'], ImportService> = {
     contact: 'contacts',
     calendar: 'calendar',
@@ -503,6 +613,27 @@ const SERVICE_FOR_RECORD: Record<InsertableRecord['recordType'], ImportService> 
 // container counts for nothing, since its events carry the count.
 function progressUnits(record: InsertableRecord): number {
     return record.recordType === 'calendar' ? 0 : 1
+}
+
+function recordLabel(record: InsertableRecord): string {
+    switch (record.recordType) {
+        case 'contact':
+            return `"${contactName(record) || record.email || '(No name)'}"`
+        case 'calendar':
+            return `"${record.name || 'Imported Calendar'}"`
+        case 'calendar_event':
+            return `"${record.title || '(No title)'}"`
+        case 'drive_folder':
+            return `"${record.path}"`
+        case 'drive_file':
+            return `"${record.parentPath ? `${record.parentPath}/` : ''}${record.name}"`
+        case 'mail_message':
+            return `"${record.message.subject || '(No Subject)'}"`
+    }
+}
+
+function contactName(contact: ParsedContact): string {
+    return [contact.first_name, contact.last_name].filter(Boolean).join(' ')
 }
 
 // Parts of an imported record that could not be carried over, such as a

@@ -31,7 +31,12 @@ interface Recorded {
     updateKeys: Map<string, string[][]>
 }
 
-function recordingPb(): { pb: PocketBase; recorded: Recorded } {
+// `rows` is what getList answers per collection; empty unless a test needs an
+// earlier import's rows to be found.
+function recordingPb(rows: Record<string, Record<string, string>[]> = {}): {
+    pb: PocketBase
+    recorded: Recorded
+} {
     const recorded: Recorded = { filters: new Map(), createKeys: new Map(), updateKeys: new Map() }
     let nextId = 0
 
@@ -51,7 +56,7 @@ function recordingPb(): { pb: PocketBase; recorded: Recorded } {
         },
         getList: (_page: number, _per: number, opts: { filter: string }) => {
             noteFilter(name, opts.filter)
-            return Promise.resolve({ items: [] })
+            return Promise.resolve({ items: rows[name] ?? [] })
         },
         create: (payload: Record<string, unknown> | FormData) => {
             const keys =
@@ -135,7 +140,7 @@ const thread: MailThreadPlan = {
     isRead: false,
     isStarred: false,
     labels: ['Receipts'],
-    earliestMessageId: '<m1@x>',
+    messageIds: ['<m1@x>', '<m2@x>'],
 }
 
 const mailMessage: ParsedMailMessage = {
@@ -203,7 +208,8 @@ const EXPECTED_FILTERS: Record<string, string[]> = {
         'name = {:name} && parent = {:parent} && is_folder = true',
     ],
     labels: ['name = {:name} && user = {:user}'],
-    mail_messages: ['message_id = {:mid}'],
+    mail_messages: ['thread.mailbox = {:mailbox} && (message_id = {:m0} || message_id = {:m1})'],
+    mail_threads: ['mailbox = {:mailbox} && subject = {:subject}'],
 }
 
 const EXPECTED_CREATE_KEYS: Record<string, string[][]> = {
@@ -295,7 +301,55 @@ const EXPECTED_UPDATE_KEYS: Record<string, string[][]> = {
     mail_threads: [['snippet']],
 }
 
+// A second run finds the thread an earlier run made, so it checks the thread
+// state, label assignments and each message instead of creating them. The
+// later message has no Message-ID, so it is matched on sender and subject.
+async function runReimport() {
+    const { pb, recorded } = recordingPb({
+        mail_messages: [{ thread: 't_old', date: '2020-01-01 00:00:00.000Z' }],
+        mail_thread_state: [{ id: 's_old' }],
+        label_assignments: [{ id: 'la_old' }],
+    })
+    const inserter = createBatchInserter({
+        pb,
+        context: { userId: 'u1', mailboxId: 'mb1' },
+        onProgress: () => {},
+    })
+    await inserter.insertRecords([
+        { ...mailMessages[0], message: { ...mailMessages[0].message, message_id: '' } },
+        mailMessages[1],
+    ])
+    return recorded
+}
+
+const EXPECTED_REIMPORT_FILTERS: Record<string, string[]> = {
+    label_assignments: ['label = {:label} && record_id = {:record}'],
+    labels: ['name = {:name} && user = {:user}'],
+    mail_messages: [
+        'thread = {:thread} && message_id = {:mid}',
+        'thread = {:thread} && sender_email = {:sender} && subject = {:subject}',
+        'thread.mailbox = {:mailbox} && (message_id = {:m0} || message_id = {:m1})',
+    ],
+    mail_thread_state: ['thread = {:thread} && user = {:user}'],
+}
+
 describe('batch inserter mirrored-schema contract', () => {
+    it('re-import looks up existing rows with exactly the owning packages’ field names', async () => {
+        const recorded = await runReimport()
+        expect(
+            Object.fromEntries([...recorded.filters].map(([c, f]) => [c, [...f].sort()]))
+        ).toEqual(EXPECTED_REIMPORT_FILTERS)
+    })
+
+    it('re-import creates only the label and the message that were missing', async () => {
+        const recorded = await runReimport()
+        expect([...recorded.createKeys.keys()].sort()).toEqual(['labels', 'mail_messages'])
+        expect(recorded.createKeys.get('mail_messages')).toEqual([
+            EXPECTED_CREATE_KEYS.mail_messages[0],
+        ])
+        expect(Object.fromEntries(recorded.updateKeys)).toEqual({})
+    })
+
     it('touches exactly the expected collections', async () => {
         const recorded = await runFullImport()
         expect([...recorded.createKeys.keys()].sort()).toEqual(

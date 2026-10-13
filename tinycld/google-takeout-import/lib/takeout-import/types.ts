@@ -140,8 +140,8 @@ export interface MailThreadPlan {
     isRead: boolean
     isStarred: boolean
     labels: string[]
-    /** message_id of the earliest message; if that row exists, the thread was imported before. */
-    earliestMessageId: string
+    /** message_id of each message; if one of these rows exists, the thread was imported before. */
+    messageIds: string[]
 }
 
 /** One message, streamed in the insert pass, with the plan of its thread. */

@@ -99,7 +99,7 @@ export class MailPlanBuilder {
                 isRead: !thread.labels.has('Unread'),
                 isStarred: thread.labels.has('Starred'),
                 labels: labels.filter(l => !STANDARD_LABELS.has(l) && !l.startsWith('Category ')),
-                earliestMessageId: earliest.messageId,
+                messageIds: ordered.map(m => m.messageId),
             }
             ordered.forEach(({ index }, position) => {
                 planned.set(index, {

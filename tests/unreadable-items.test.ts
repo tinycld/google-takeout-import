@@ -260,7 +260,7 @@ describe('batch inserter failure reporting', () => {
                 {
                     errors: 1,
                     errorMessages: [
-                        'Calendar "Missing" was not created, so event "Standup" was not imported',
+                        '"Standup": Not imported because calendar "Missing" was not created',
                     ],
                 },
             ],
@@ -280,7 +280,7 @@ describe('batch inserter failure reporting', () => {
             },
         ])
         expect(progress[0][1].errorMessages).toEqual([
-            'Folder "Docs" was not created, so "a.txt" was not imported',
+            '"Docs/a.txt": Not imported because folder "Docs" was not created',
         ])
     })
 })
