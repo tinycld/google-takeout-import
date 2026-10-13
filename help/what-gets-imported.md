@@ -15,7 +15,7 @@ Google exports your mail as one `.mbox` file. Each message is imported into your
 
 - **Folder** — the Gmail label decides where a thread lands: Inbox, Sent, Drafts, Trash, or Spam. Anything with no folder label goes to **Archive**, unless it was unread, in which case it goes to **Inbox**.
 - **Read and starred state** are preserved.
-- **Your own labels** become TinyCld [labels](help://mail:labels) with the same names, created if they don't exist yet. Gmail's built-in labels (Important, Category Promotions, and so on) are not turned into labels.
+- **Your own labels** become TinyCld [labels](help://mail:labels) with the same names, created if they don't exist yet. Gmail's built-in labels (Important, Category Promotions, and so on) are not turned into labels. Labels that start with `IMAP_` are not turned into labels either: Gmail makes them from the flags an email app such as Apple Mail sets, for example `IMAP_$Junk`. Folders that an email app made in Gmail, such as `[Imap]/Archive` or `Deleted Messages`, are real Gmail labels and are imported.
 - **Attachments** are imported with their messages.
 - The body is imported as HTML, with plain-text-only messages converted so they display the same way.
 
