@@ -179,12 +179,16 @@ async function runFullImport() {
         onProgress: () => {},
     })
     await inserter.insertRecords([
-        // Three contacts, one per dedup branch (uid / email / name pair).
+        // Four contacts, one per dedup branch (uid / email / name pair /
+        // one-part name with phone).
         contact({ vcard_uid: 'v1', first_name: 'Ada' }),
         contact({ email: 'ada@example.com' }),
         contact({ first_name: 'Ada', last_name: 'Lovelace' }),
+        contact({ first_name: 'Acme', phone: '555-0100' }),
         calendar,
         calendarEvent,
+        // No UID, so it is matched on title and start.
+        { ...calendarEvent, ical_uid: '' },
         driveFolder,
         driveFile,
         ...mailMessages,
@@ -198,11 +202,16 @@ async function runFullImport() {
 const EXPECTED_FILTERS: Record<string, string[]> = {
     contacts: [
         'email = {:email} && owner = {:owner}',
+        'first_name = {:first} && last_name = "" && phone = {:phone} && owner = {:owner}',
         'first_name = {:first} && last_name = {:last} && owner = {:owner}',
         'vcard_uid = {:uid}',
     ],
     calendar_calendars: ['name = {:name}'],
-    calendar_events: ['calendar = {:cal}', 'ical_uid = {:uid}'],
+    calendar_events: [
+        'calendar = {:cal}',
+        'calendar = {:cal} && ical_uid = {:uid}',
+        'calendar = {:cal} && title = {:title} && start = {:start}',
+    ],
     drive_items: [
         'name = {:name} && parent = {:parent}',
         'name = {:name} && parent = {:parent} && is_folder = true',
@@ -213,7 +222,7 @@ const EXPECTED_FILTERS: Record<string, string[]> = {
 }
 
 const EXPECTED_CREATE_KEYS: Record<string, string[][]> = {
-    contacts: Array(3).fill(
+    contacts: Array(4).fill(
         [
             'company',
             'email',
@@ -229,7 +238,7 @@ const EXPECTED_CREATE_KEYS: Record<string, string[][]> = {
         ].sort()
     ),
     calendar_calendars: [['color', 'id', 'name'].sort()],
-    calendar_events: [
+    calendar_events: Array(2).fill(
         [
             'all_day',
             'busy_status',
@@ -246,8 +255,8 @@ const EXPECTED_CREATE_KEYS: Record<string, string[][]> = {
             'start',
             'title',
             'visibility',
-        ].sort(),
-    ],
+        ].sort()
+    ),
     drive_items: [
         // folder, then file (adds the blob)
         [

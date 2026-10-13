@@ -42,8 +42,14 @@ export function parseCalendarEntry(path: string, data: Uint8Array): CalendarEntr
 
     const events: ParsedCalendarEvent[] = []
     const failures: ParsedUnreadable[] = []
-    for (const vevent of vcalendar.getAllSubcomponents('vevent')) {
-        const event = parseEvent(vevent, calendarName)
+    const vevents = vcalendar.getAllSubcomponents('vevent')
+    const seriesUids = new Set(
+        vevents
+            .filter(v => !v.hasProperty('recurrence-id'))
+            .map(v => v.getFirstPropertyValue('uid'))
+    )
+    for (const vevent of vevents) {
+        const event = parseEvent(vevent, calendarName, seriesUids)
         if (event.recordType === 'calendar_event') events.push(event)
         else failures.push(event)
     }
@@ -61,7 +67,8 @@ export function countCalendarEntry(path: string, data: Uint8Array): number {
 
 function parseEvent(
     vevent: ICAL.Component,
-    calendarName: string
+    calendarName: string,
+    seriesUids: Set<unknown>
 ): ParsedCalendarEvent | ParsedUnreadable {
     const summary = (vevent.getFirstPropertyValue('summary') as string) || ''
     const description = (vevent.getFirstPropertyValue('description') as string) || ''
@@ -69,6 +76,18 @@ function parseEvent(
     const uid = (vevent.getFirstPropertyValue('uid') as string) || ''
     const rruleProp = vevent.getFirstProperty('rrule')
     const recurrence = rruleProp ? rruleProp.getFirstValue()?.toString() || '' : ''
+
+    // A changed occurrence shares its series' UID. Calendar events cannot
+    // record that one occurrence of a series moved or was cancelled, so
+    // importing it would show the occurrence twice. An occurrence whose
+    // series is not in the file (an invite to one meeting) imports as is.
+    if (vevent.hasProperty('recurrence-id') && seriesUids.has(uid)) {
+        const occurrence = vevent.getFirstPropertyValue('recurrence-id') as ICAL.Time
+        return unreadable(
+            'calendar',
+            `The change to "${summary || '(No title)'}" on ${occurrence.toJSDate().toISOString().slice(0, 10)} in ${calendarName} was not imported: changes to one occurrence of a repeating event are not supported`
+        )
+    }
 
     const dtstart = vevent.getFirstPropertyValue('dtstart') as ICAL.Time | null
     const dtend = vevent.getFirstPropertyValue('dtend') as ICAL.Time | null

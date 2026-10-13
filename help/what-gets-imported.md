@@ -23,7 +23,7 @@ Google exports your mail as one `.mbox` file. Each message is imported into your
 
 Each calendar in the export is a separate `.ics` file and becomes one TinyCld calendar with the same name. If you already have a calendar with that name, the events are added to it instead of creating a second one.
 
-For each event: title, description, location, start and end, all-day flag, the repeat rule for recurring events, guests with their RSVP status, the first reminder, busy/free status, and visibility. Events with no start time are dropped.
+For each event: title, description, location, start and end, all-day flag, the repeat rule for recurring events, guests with their RSVP status, the first reminder, busy/free status, and visibility. Events with no start time are not imported. A change to one occurrence of a repeating event, such as one meeting moved to another time, is not imported either; the series imports with its normal schedule. Both are listed under the failed items.
 
 ## Google Contacts → Contacts
 

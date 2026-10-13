@@ -117,3 +117,50 @@ describe('asHtmlDocument', () => {
         expect(asHtmlDocument('')).toBe('<!DOCTYPE html>\n<p></p>')
     })
 })
+
+describe('calendar event without a UID', () => {
+    it('is matched on title and start in the form PocketBase stores dates', async () => {
+        const filters: Record<string, unknown>[] = []
+        const pb = {
+            collection: () => ({
+                getFirstListItem: () =>
+                    Promise.reject(Object.assign(new Error('not found'), { status: 404 })),
+                getList: () => Promise.resolve({ items: [] }),
+                create: () => Promise.resolve({ id: 'cal_1' }),
+            }),
+            filter: (_expr: string, params: Record<string, unknown>) => {
+                filters.push(params)
+                return ''
+            },
+        } as unknown as PocketBase
+        const inserter = createBatchInserter({
+            pb,
+            context: { userId: 'u1', mailboxId: 'mb1' },
+            onProgress: () => {},
+        })
+
+        await inserter.insertRecords([
+            { recordType: 'calendar', name: 'Work', events: [] },
+            {
+                recordType: 'calendar_event',
+                calendarName: 'Work',
+                title: '',
+                description: '',
+                location: '',
+                start: '2025-01-03T11:00:00.000Z',
+                end: '2025-01-03T12:00:00.000Z',
+                all_day: false,
+                recurrence: '',
+                ical_uid: '',
+                guests: [],
+                reminder: 0,
+                busy_status: 'busy',
+                visibility: 'default',
+            },
+        ])
+
+        expect(filters).toContainEqual(
+            expect.objectContaining({ title: '(No title)', start: '2025-01-03 11:00:00.000Z' })
+        )
+    })
+})

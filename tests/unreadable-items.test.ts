@@ -89,6 +89,37 @@ describe('calendar parser', () => {
         expect(countCalendarEntry(ICS_PATH, data)).toBe(2)
     })
 
+    it('reports a changed occurrence of a series in the file', () => {
+        const data = strToU8(
+            ics([
+                [start, 'UID:s1', 'SUMMARY:Standup', 'RRULE:FREQ=DAILY'],
+                [
+                    'DTSTART:20250103T110000Z',
+                    'UID:s1',
+                    'SUMMARY:Standup',
+                    'RECURRENCE-ID:20250103T100000Z',
+                ],
+            ])
+        )
+        const { calendar, unreadable: failures } = parseCalendarEntry(ICS_PATH, data)
+        expect(calendar?.events).toHaveLength(1)
+        expect(failures).toEqual([
+            unreadable(
+                'calendar',
+                'The change to "Standup" on 2025-01-03 in Work was not imported: changes to one occurrence of a repeating event are not supported'
+            ),
+        ])
+    })
+
+    it('imports a single occurrence whose series is not in the file', () => {
+        const data = strToU8(
+            ics([['DTSTART:20250103T110000Z', 'UID:s1', 'RECURRENCE-ID:20250103T100000Z']])
+        )
+        const { calendar, unreadable: failures } = parseCalendarEntry(ICS_PATH, data)
+        expect(failures).toEqual([])
+        expect(calendar?.events).toHaveLength(1)
+    })
+
     it('reports a calendar file that does not parse', () => {
         const { calendar, unreadable: failures } = parseCalendarEntry(
             ICS_PATH,

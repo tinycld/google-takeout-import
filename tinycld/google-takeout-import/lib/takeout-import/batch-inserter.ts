@@ -137,12 +137,19 @@ export function createBatchInserter({
                 if (!isNotFound(err)) throw err
                 // Not found — proceed to create
             }
-        } else if (contact.first_name && contact.last_name) {
+        } else {
+            // The parser always sets first_name. A card with a one-part name,
+            // such as a company or a bare phone number, is matched on its
+            // phone too, so two such contacts with the same name both import.
+            const filter = contact.last_name
+                ? 'first_name = {:first} && last_name = {:last} && owner = {:owner}'
+                : 'first_name = {:first} && last_name = "" && phone = {:phone} && owner = {:owner}'
             try {
                 await pb.collection('contacts').getFirstListItem(
-                    pb.filter('first_name = {:first} && last_name = {:last} && owner = {:owner}', {
+                    pb.filter(filter, {
                         first: contact.first_name,
                         last: contact.last_name,
+                        phone: contact.phone,
                         owner: userId,
                     })
                 )
@@ -224,16 +231,26 @@ export function createBatchInserter({
             throw new Error(`Not imported because calendar "${event.calendarName}" was not created`)
         }
 
-        if (event.ical_uid) {
-            try {
-                await pb
-                    .collection('calendar_events')
-                    .getFirstListItem(pb.filter('ical_uid = {:uid}', { uid: event.ical_uid }))
-                return 'skipped'
-            } catch (err) {
-                if (!isNotFound(err)) throw err
-                // Not found — proceed to create
-            }
+        // UIDs are unique within a calendar, not across calendars. An event
+        // with no UID gets a random one below, so a later run matches it on
+        // title and start instead.
+        const title = event.title || '(No title)'
+        const existing = event.ical_uid
+            ? pb.filter('calendar = {:cal} && ical_uid = {:uid}', {
+                  cal: calendarId,
+                  uid: event.ical_uid,
+              })
+            : pb.filter('calendar = {:cal} && title = {:title} && start = {:start}', {
+                  cal: calendarId,
+                  title,
+                  start: toStoredDate(event.start),
+              })
+        try {
+            await pb.collection('calendar_events').getFirstListItem(existing)
+            return 'skipped'
+        } catch (err) {
+            if (!isNotFound(err)) throw err
+            // Not found — proceed to create
         }
 
         await withRetry(() =>
@@ -241,7 +258,7 @@ export function createBatchInserter({
                 id: newRecordId(),
                 calendar: calendarId,
                 created_by: userId,
-                title: event.title || '(No title)',
+                title,
                 description: event.description,
                 location: event.location,
                 start: event.start,
@@ -591,6 +608,11 @@ const MESSAGE_ID_CHUNK = 25
 
 function threadSubject(thread: MailThreadPlan): string {
     return thread.subject.slice(0, 998)
+}
+
+// The form PocketBase stores a date in, which a filter must match exactly.
+function toStoredDate(iso: string): string {
+    return new Date(iso).toISOString().replace('T', ' ')
 }
 
 // PocketBase returns dates as "2024-01-29 17:34:35.000Z", not ISO 8601, so the
