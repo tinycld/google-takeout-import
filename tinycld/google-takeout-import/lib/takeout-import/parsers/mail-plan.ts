@@ -22,6 +22,14 @@ const STANDARD_LABELS = new Set([
     'Chat',
 ])
 
+// Gmail stores an IMAP client's message flags ($Forwarded, $Junk, NotJunk…)
+// as labels named IMAP_<flag>. They are flags, not labels the user made.
+function isUserLabel(label: string): boolean {
+    return (
+        !STANDARD_LABELS.has(label) && !label.startsWith('Category ') && !label.startsWith('IMAP_')
+    )
+}
+
 function resolveFolder(labels: Set<string>): MailFolder {
     for (const [label, folder] of FOLDER_BY_LABEL) {
         if (labels.has(label)) return folder
@@ -98,8 +106,8 @@ export class MailPlanBuilder {
                 folder: resolveFolder(thread.labels),
                 isRead: !thread.labels.has('Unread'),
                 isStarred: thread.labels.has('Starred'),
-                labels: labels.filter(l => !STANDARD_LABELS.has(l) && !l.startsWith('Category ')),
-                earliestMessageId: earliest.messageId,
+                labels: labels.filter(isUserLabel),
+                messageIds: ordered.map(m => m.messageId),
             }
             ordered.forEach(({ index }, position) => {
                 planned.set(index, {

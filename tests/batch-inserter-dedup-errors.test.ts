@@ -62,7 +62,10 @@ describe('dedup lookup failure handling', () => {
         )
         expect(creates).toEqual([])
         expect(progress).toContainEqual(
-            expect.objectContaining({ errors: 1, errorMessages: ['server exploded'] })
+            expect.objectContaining({
+                errors: 1,
+                errorMessages: ['"Ada Lovelace": server exploded'],
+            })
         )
     })
 

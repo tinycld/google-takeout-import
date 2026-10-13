@@ -11,9 +11,9 @@ You can run the importer as many times as you like. It never creates a second co
 
 Before writing each item, the importer looks for a matching one in TinyCld:
 
-- **Contacts** by the contact's Google identifier, otherwise by email address, otherwise by first and last name.
-- **Calendar events** by the event's identifier; **calendars** by name.
-- **Mail** by the message id of the first message in the thread.
+- **Contacts** by the contact's Google identifier, otherwise by email address, otherwise by first and last name. A contact with only one name, such as a company, is matched on its name and phone number.
+- **Calendar events** by the event's identifier within the same calendar, otherwise by title and start time; **calendars** by name.
+- **Mail** by each message's message id, in the same mailbox. When some messages of a thread were imported before, the rest are added to that thread, not to a new one.
 - **Drive** files and folders by name within the same folder.
 
 A match counts as **skipped** on the progress card and in the completion summary. Only items with no match are written, so a second run of the same archive reports everything skipped and nothing imported.
