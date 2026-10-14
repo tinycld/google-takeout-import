@@ -16,7 +16,7 @@ User-facing behavior:
 - **Mailbox prerequisite** — mail lands in the user's default mailbox (`useDefaultMailbox`, the first `mail_mailbox_members` row where `user` is the current user). If Mail is detected but no mailbox resolves, the row is disabled with *Set up a mailbox first* and the screen says *"This export has mail, but you have no mailbox. Create or join one in Mail settings, then come back. Your files stay selected."* Start is also held while the mailbox lookup is still in flight so a mail import can never launch with a null mailbox; `runFallbackImport` re-checks this (Guard B) and throws rather than silently importing zero threads.
 - **Progress, cancel, and errors** — one row per active service (`Reading archive…` → `NN%` → check mark, with imported / skipped counts and a progress bar). Per-record failures are recorded and the run continues; an *N items failed* disclosure lists the first 20 messages and summarises the rest. **Cancel import** stops at the next record and leaves already-written records in place; the screen returns to the detection view so the same selection can be started again. Whole-run failures (unreadable zip, over the size limit, mail with no mailbox) show **Import failed** with **Try again**.
 - **Completion** — *Import complete — N items imported · N already here · N errors* with **Import more files**, which resets the store to the file-select state. A finished run also writes one `import-finished` notice into core `notifications` (`recordImportFinished` in `lib/takeout-import/record-import-finished.ts`, payload from `import-notice.ts`) linking back to this screen; a failed notice write is logged and never turns the completed import into an error.
-- **Idempotent re-runs** — every record type is deduplicated against what already exists (see below). A re-import of the same archive, or of a later export of the same account, adds only new items. An existing record is **skipped, never updated**.
+- **Idempotent re-runs** — every record type is deduplicated against what already exists (see below). A re-import of the same archive, or of a later export of the same account, adds only new items. An existing record is **skipped, never updated** — except a mail thread reused from an earlier run, whose `snippet` is set when its earliest message imports.
 
 Runs on web and native identically: the import used to run in a Web Worker on web, but the worker module was never bundled (this package ships raw `.ts` with no Metro config), so construction 404'd and fell through to the main thread every time. The worker path is gone; `run-import.web.ts` and `run-import.native.ts` are kept only for Metro's platform-suffix resolution and are byte-for-byte the same logic.
 
@@ -116,25 +116,26 @@ Every created record gets a client-side `newRecordId()`; `contacts.vcard_uid` an
 
 ### Dedup rules
 
-Dedup lookups treat **only a 404 as "not found — create it"**. Any other failure (network drop, expired auth, 500) propagates and aborts that row; swallowing it once answered "does this exist?" with "no" on a transient error and minted duplicates. On a hit the record is **skipped** (counted as such), never updated.
+Dedup lookups treat **only a 404 as "not found — create it"**. Any other failure (network drop, expired auth, 500) propagates and aborts that row; swallowing it once answered "does this exist?" with "no" on a transient error and minted duplicates. On a hit the record is **skipped** (counted as such), never updated (the reused-thread `snippet` above is the one exception).
 
 | Record | Matched by (first applicable rule wins) |
 |---|---|
-| Contact | `vcard_uid`; else `email` + `owner`; else `first_name` + `last_name` + `owner` |
+| Contact | `vcard_uid`; else `email` + `owner`; else `first_name` + `last_name` + `owner`, or, when `last_name` is empty, `first_name` + `phone` + `owner` |
 | Calendar | `name` — an existing calendar of the same name is reused and its events go into it |
-| Event | `ical_uid` |
+| Event | `calendar` + `ical_uid`; an event with no UID: `calendar` + `title` + `start` |
 | Drive folder | `name` + `parent` + `is_folder = true` — reused so children resolve into it |
 | Drive file | `name` + `parent` |
-| Mail thread | `message_id` of the thread's first message, looked up in `mail_messages` |
+| Mail thread | the `message_id` of any of its messages, among `mail_messages` in the target mailbox (25 at a time); else an empty thread left by a failed run, with the same `mailbox` + `subject` + `latest_date` |
+| Mail message (in a reused thread) | `thread` + `message_id`; a message with no Message-ID: `thread` + sender + subject + date |
 | Label | `name` + `user` |
 
-The calendar-name, `ical_uid`, and `message_id` lookups are deliberately unscoped: they run under the caller's credentials, so each collection's list rule already narrows them to what the user can see. That holds while one deployment is one workspace on one PocketBase; if a router ever multiplexed several tenants over a single PocketBase instance these lookups would match across tenants (see the comment in `insertCalendar`).
+The calendar-name lookup is deliberately unscoped: it runs under the caller's credentials, so `calendar_calendars`' list rule already narrows it to the calendars the user is a member of. The `ical_uid` lookup is scoped to the target calendar, and the `message_id` lookups to the target mailbox or thread.
 
 ### Limits and guards
 
 - **8 GB uncompressed per run** — `MAX_TOTAL_UNCOMPRESSED_BYTES` in `import-worker-fallback.ts`, summed across every selected zip from the zip directories before anything is decompressed. Over the limit the run fails up front with *"This export is too large to import (N GB uncompressed). Split your Google Takeout archive into smaller downloads and import them one at a time."* Overridable via the `maxTotalUncompressedBytes` test seam.
 - **Batches of 50** records per service sink, with a `setTimeout(0)` yield after each flush so the UI stays responsive on the main thread.
-- **One retry** after 1 s on every `create`.
+- **One retry** after 1 s on a failed `create` or `update`. A request the server rejected with a 4xx (other than 429) is not retried, since the same payload gets the same answer.
 - **Field truncation** to the owning schemas' limits: contact names 100, company / title 200, `vcard_uid` 255; event title / location / recurrence / `ical_uid` 500, description 5000; mail subject 998, snippet 300.
 - **Error list** in the UI is capped at 20 messages plus an *and N more* line; the counts are always complete.
 

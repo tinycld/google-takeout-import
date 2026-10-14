@@ -185,10 +185,7 @@ export function createBatchInserter({
         //
         // Deliberately unscoped: the read is evaluated under the caller's
         // credentials, so calendar_calendars' list rule already narrows it to
-        // calendars they're a member of. Safe while one deployment is one org —
-        // but if a router ever multiplexes several orgs over ONE PocketBase
-        // instance, this (and the ical_uid/message_id lookups below) would match
-        // across tenants. See hosting/HANDOFF.md.
+        // calendars they're a member of.
         try {
             const existing = await pb
                 .collection('calendar_calendars')
