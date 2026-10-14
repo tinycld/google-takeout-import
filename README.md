@@ -129,7 +129,7 @@ Dedup lookups treat **only a 404 as "not found — create it"**. Any other failu
 | Mail message (in a reused thread) | `thread` + `message_id`; a message with no Message-ID: `thread` + sender + subject + date |
 | Label | `name` + `user` |
 
-The calendar-name lookup is deliberately unscoped: it runs under the caller's credentials, so `calendar_calendars`' list rule already narrows it to the calendars the user is a member of. The `ical_uid` lookup is scoped to the target calendar, and the `message_id` lookups to the target mailbox or thread.
+The calendar-name, contact `vcard_uid` and root-level drive lookups are not scoped to the user in the filter: they run under the caller's credentials, so each collection's list rule already narrows them to what the user can see. The `ical_uid` lookup is scoped to the target calendar, and the `message_id` lookups to the target mailbox or thread.
 
 ### Limits and guards
 
