@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { renderHook, waitFor } from '@testing-library/react'
+import { log } from '@tinycld/core/lib/logger'
 import { useDefaultMailbox } from '@tinycld/google-takeout-import/hooks/useDefaultMailbox'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type MemberRow = { id: string; user: string; mailbox: string }
 
@@ -10,15 +11,34 @@ const h = vi.hoisted(() => ({
     isMailInstalled: true,
     userId: 'u1',
     collection: undefined as unknown,
+    loadError: undefined as Error | undefined,
 }))
 
 vi.mock('@tinycld/core/lib/pocketbase', async () => {
     const { createCollection, localOnlyCollectionOptions } = await import('@tanstack/db')
+    // An on-demand collection whose subset load rejects, as a pbtsdb collection
+    // does when PocketBase refuses the query (a renamed column, say).
+    const failingCollection = (error: Error) =>
+        createCollection<MemberRow, string>({
+            getKey: r => r.id,
+            syncMode: 'on-demand',
+            sync: {
+                sync: ({ markReady }) => {
+                    markReady()
+                    return { loadSubset: () => Promise.reject(error) }
+                },
+            },
+        })
     // One collection per test, built on first lookup so it holds that test's rows.
     const membersCollection = () => {
-        h.collection ??= createCollection(
-            localOnlyCollectionOptions({ getKey: (r: MemberRow) => r.id, initialData: h.rows })
-        )
+        h.collection ??= h.loadError
+            ? failingCollection(h.loadError)
+            : createCollection(
+                  localOnlyCollectionOptions({
+                      getKey: (r: MemberRow) => r.id,
+                      initialData: h.rows,
+                  })
+              )
         return h.collection
     }
     return {
@@ -36,6 +56,11 @@ beforeEach(() => {
     h.isMailInstalled = true
     h.userId = 'u1'
     h.collection = undefined
+    h.loadError = undefined
+})
+
+afterEach(() => {
+    vi.restoreAllMocks()
 })
 
 describe('useDefaultMailbox', () => {
@@ -86,5 +111,32 @@ describe('useDefaultMailbox', () => {
 
         expect(result.current.loading).toBe(false)
         expect(result.current.mailboxId).toBeNull()
+    })
+
+    // A failed query reads to the UI as "you have no mailbox", so the failure
+    // must reach Sentry, once, however often the hook re-renders.
+    it('reports a failed query once and resolves to no mailbox', async () => {
+        h.loadError = new Error("invalid filter: unknown field 'user'")
+        const errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {})
+        // TanStack DB prints its own "[Live Query Error]" line for the failure.
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+
+        const { result, rerender } = renderHook(() => useDefaultMailbox())
+
+        await waitFor(() => {
+            expect(result.current.loading).toBe(false)
+        })
+        rerender()
+        rerender()
+
+        expect(result.current.mailboxId).toBeNull()
+        expect(errorSpy).toHaveBeenCalledTimes(1)
+        expect(errorSpy).toHaveBeenCalledWith(
+            'google-takeout-import.default-mailbox',
+            h.loadError,
+            {
+                collection: 'mail_mailbox_members',
+            }
+        )
     })
 })

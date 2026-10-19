@@ -1,6 +1,8 @@
 import { eq } from '@tanstack/db'
+import { log } from '@tinycld/core/lib/logger'
 import { collectionByName } from '@tinycld/core/lib/pocketbase'
 import { useMyLiveQuery } from '@tinycld/core/lib/use-my-live-query'
+import { useEffect } from 'react'
 
 // mail owns this collection, and this package takes no hard @tinycld/mail
 // dependency, so it is resolved by name: undefined when mail is not installed.
@@ -21,7 +23,13 @@ export interface DefaultMailbox {
 
 export function useDefaultMailbox(): DefaultMailbox {
     const collection = collectionByName(MAILBOX_MEMBERS)
-    const { data, isEnabled, isReady, isError } = useMyLiveQuery((query, { userId }) =>
+    const {
+        data,
+        isEnabled,
+        isReady,
+        isError,
+        collection: liveQuery,
+    } = useMyLiveQuery((query, { userId }) =>
         collection
             ? query
                   .from({ member: collection })
@@ -29,6 +37,19 @@ export function useDefaultMailbox(): DefaultMailbox {
                   .findOne()
             : null
     )
+
+    // A drift from mail's schema (a renamed column, a changed rule) fails the
+    // query, and the UI reads that as "you have no mailbox", which is
+    // indistinguishable from the real thing. Report it so the next rename is
+    // loud. The effect runs when the query enters the error state, not on
+    // every render, so each failure reports once.
+    useEffect(() => {
+        if (!isError) return
+        log.error('google-takeout-import.default-mailbox', liveQuery?._lifecycle.getSyncError(), {
+            collection: MAILBOX_MEMBERS,
+        })
+    }, [isError, liveQuery])
+
     const mailboxId = data ? column(data, 'mailbox') : undefined
     return {
         mailboxId: mailboxId || null,
