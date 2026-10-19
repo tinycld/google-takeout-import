@@ -101,7 +101,7 @@ The inserter writes into collections owned by four other packages plus core. It 
 | Service | Collection | Fields written | Ownership |
 |---|---|---|---|
 | Contacts | `contacts` | `id`, `first_name`, `last_name`, `email`, `phone`, `company`, `job_title`, `notes`, `vcard_uid`, `favorite: false` | `owner = userId` |
-| Calendar | `calendar_calendars` | `id`, `name`, `color: 'blue'` | membership is created by calendar's server hook; the inserter polls `calendar_events` until the new calendar is visible through the rule context before inserting into it |
+| Calendar | `calendar_calendars` | `id`, `name`, `color: '#3b82f6'` (calendar's default hex; Takeout's `.ics` carries no calendar colour) | membership is created by calendar's server hook; the inserter polls `calendar_events` until the new calendar is visible through the rule context before inserting into it |
 | | `calendar_events` | `id`, `calendar`, `title`, `description`, `location`, `start`, `end`, `all_day`, `recurrence`, `ical_uid`, `guests`, `reminder`, `busy_status`, `visibility` | `created_by = userId` |
 | Drive | `drive_items` | folders first (`is_folder: true`, `size: 0`), then files as multipart with the `file` blob; `parent` resolved from the folder map | `created_by = userId` |
 | | `drive_shares` | not written by the inserter — drive's server hook creates the `role: 'owner'` share for each item in the same transaction, keyed on `created_by` | `user = userId` |

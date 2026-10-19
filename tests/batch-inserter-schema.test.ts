@@ -29,6 +29,7 @@ interface Recorded {
     filters: Map<string, Set<string>>
     createKeys: Map<string, string[][]>
     updateKeys: Map<string, string[][]>
+    createPayloads: Map<string, Record<string, unknown>[]>
 }
 
 // `rows` is what getList answers per collection; empty unless a test needs an
@@ -37,7 +38,12 @@ function recordingPb(rows: Record<string, Record<string, string>[]> = {}): {
     pb: PocketBase
     recorded: Recorded
 } {
-    const recorded: Recorded = { filters: new Map(), createKeys: new Map(), updateKeys: new Map() }
+    const recorded: Recorded = {
+        filters: new Map(),
+        createKeys: new Map(),
+        updateKeys: new Map(),
+        createPayloads: new Map(),
+    }
     let nextId = 0
 
     const noteFilter = (collection: string, filter: string) => {
@@ -64,6 +70,11 @@ function recordingPb(rows: Record<string, Record<string, string>[]> = {}): {
             const all = recorded.createKeys.get(name) ?? []
             all.push(keys.sort())
             recorded.createKeys.set(name, all)
+            if (!(payload instanceof FormData)) {
+                const payloads = recorded.createPayloads.get(name) ?? []
+                payloads.push(payload)
+                recorded.createPayloads.set(name, payloads)
+            }
             nextId += 1
             return Promise.resolve({ id: `rec_${nextId}` })
         },
@@ -386,6 +397,15 @@ describe('batch inserter mirrored-schema contract', () => {
     it('updates records with exactly the owning packages’ field names', async () => {
         const recorded = await runFullImport()
         expect(Object.fromEntries(recorded.updateKeys)).toEqual(EXPECTED_UPDATE_KEYS)
+    })
+
+    // Calendar stores a raw hex (calendar migration 1830000011). A palette name
+    // such as 'blue' is no longer a colour it can render.
+    it('creates calendars with calendar’s default hex colour', async () => {
+        const recorded = await runFullImport()
+        expect(recorded.createPayloads.get('calendar_calendars')).toEqual([
+            expect.objectContaining({ name: 'Work', color: '#3b82f6' }),
+        ])
     })
 
     it('carries no residue of the deleted hosting schema anywhere', async () => {

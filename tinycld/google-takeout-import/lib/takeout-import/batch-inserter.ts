@@ -19,6 +19,11 @@ import type {
     ParsedUnreadable,
 } from './types'
 
+// Mirrors calendar's DEFAULT_CALENDAR_COLOR: calendars store a raw hex, and a
+// legacy palette name such as 'blue' renders as this default anyway. Takeout's
+// .ics files carry no calendar colour, so every imported calendar gets it.
+export const IMPORTED_CALENDAR_COLOR = '#3b82f6'
+
 async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
     try {
         return await fn()
@@ -202,7 +207,7 @@ export function createBatchInserter({
             pb.collection('calendar_calendars').create({
                 id: calId,
                 name: calName,
-                color: 'blue',
+                color: IMPORTED_CALENDAR_COLOR,
             })
         )
         calendarIdMap.set(cal.name, calId)
