@@ -185,7 +185,7 @@ tinycld/google-takeout-import/
         ServiceRow.tsx          one service row: toggle, count or reason, progress, error disclosure
     hooks/
         useTakeoutSection.ts    joins the store, detection, mailbox, and installed packages for the panels
-        useDefaultMailbox.ts    first mail_mailbox_members row for the user (raw pb read; mail may be absent)
+        useDefaultMailbox.ts    first mail_mailbox_members row for the user (live query on the collection resolved by name; mail may be absent)
         useInstalledSlugs.ts    memoized Set of installed package slugs from usePackages() (presence gating)
     lib/import-view.ts          pure view helpers: current step, choice rows + availability text, summaries
     lib/service-labels.ts       SERVICE_LABELS: one display label per ImportService (UI + notice body)
