@@ -12,7 +12,7 @@ const manifest = {
     ],
     help: { directory: 'help' },
     repository: { url: 'https://github.com/tinycld/google-takeout-import' },
-    peerVersions: { '@tinycld/core': '>=0.8.0 <0.9.0' },
+    peerVersions: { '@tinycld/core': '>=0.8.1 <0.9.0' },
 }
 
 export default manifest
