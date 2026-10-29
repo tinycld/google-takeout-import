@@ -396,15 +396,37 @@ function decodeTextPart(text: string, encoding: string, charset?: string): strin
     return text
 }
 
+// The content of these elements is never visible text. Removing only their
+// tags left the CSS and the document title at the start of the snippet.
+const INVISIBLE_ELEMENTS = /<(head|title|style|script)\b[^>]*>[\s\S]*?<\/\1\s*>/gi
+const HTML_COMMENT = /<!--[\s\S]*?-->/g
+const HTML_ENTITY = /&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi
+const NAMED_ENTITIES: Record<string, string> = {
+    nbsp: ' ',
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+}
+
+// One pass, so a decoded entity is never decoded again: replacing &amp; and
+// then &lt; turned the text "&amp;lt;" into "<" instead of "&lt;".
+function decodeHtmlEntities(text: string): string {
+    return text.replace(HTML_ENTITY, (entity, name: string) => {
+        if (name[0] !== '#') return NAMED_ENTITIES[name.toLowerCase()] ?? entity
+        const isHex = name[1] === 'x' || name[1] === 'X'
+        const code = Number.parseInt(name.slice(isHex ? 2 : 1), isHex ? 16 : 10)
+        return code <= 0x10ffff ? String.fromCodePoint(code) : entity
+    })
+}
+
 function stripHtml(html: string): string {
-    return html
+    const text = html
+        .replace(HTML_COMMENT, ' ')
+        .replace(INVISIBLE_ELEMENTS, ' ')
         .replace(/<[^>]*>/g, ' ')
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/&amp;/gi, '&')
-        .replace(/&lt;/gi, '<')
-        .replace(/&gt;/gi, '>')
-        .replace(/\s+/g, ' ')
-        .trim()
+    return decodeHtmlEntities(text).replace(/\s+/g, ' ').trim()
 }
 
 function escapeHtml(text: string): string {
