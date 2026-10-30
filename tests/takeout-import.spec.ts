@@ -36,6 +36,14 @@ function eventPopover(page: Page) {
     return page.getByTestId('event-detail-popover')
 }
 
+// Escape, not a click outside: the popover lets an outside press through to
+// what it lands on, and a fixed point lands on a mini calendar day, which
+// moves the view off the month under test.
+async function closeEventPopover(page: Page) {
+    await page.keyboard.press('Escape')
+    await expect(eventPopover(page)).toBeHidden()
+}
+
 // Open the calendar's Month view on a target month, entirely in-app — a
 // page.goto('?view=month&date=…') is a hard nav that tears down the SPA and
 // cancels in-flight chunk loads (see helpers.ts). Steps the header arrows
@@ -128,7 +136,7 @@ test.describe('Google Takeout Import', () => {
         await expect(eventPopover(page).getByText('Monday, April 13')).toBeVisible()
         await expect(eventPopover(page).getByText('2 guests')).toBeVisible()
         await expect(eventPopover(page).getByText('testermctesty@argosity.com')).toBeVisible()
-        await page.mouse.click(200, 200)
+        await closeEventPopover(page)
 
         // --- "30 min with tester": recurring timed events from appointment schedule ---
         await expect(visibleText(page, '30 min with tester').first()).toBeVisible()
@@ -140,7 +148,7 @@ test.describe('Google Takeout Import', () => {
         await expect(eventPopover(page).getByText('Test Entry #1')).toBeVisible()
         await expect(eventPopover(page).getByText('Monday, April 6')).toBeVisible()
         await expect(eventPopover(page).getByText(/guest/)).not.toBeVisible()
-        await page.mouse.click(200, 200)
+        await closeEventPopover(page)
 
         // --- Test Entry #2: all-day Apr 24 (Friday) ---
         await expect(visibleText(page, 'Test Entry #2').first()).toBeVisible()
@@ -149,7 +157,7 @@ test.describe('Google Takeout Import', () => {
         await expect(eventPopover(page).getByText('Test Entry #2')).toBeVisible()
         await expect(eventPopover(page).getByText('Friday, April 24')).toBeVisible()
         await expect(eventPopover(page).getByText(/guest/)).not.toBeVisible()
-        await page.mouse.click(200, 200)
+        await closeEventPopover(page)
     })
 
     test('verify recurring event imported and displayed', async ({ page }) => {
@@ -164,7 +172,7 @@ test.describe('Google Takeout Import', () => {
         // FREQ=MONTHLY;COUNT=12;BYMONTHDAY=1 → "Monthly on day 1, 12 times"
         await expect(eventPopover(page).getByText('Monthly on day 1, 12 times')).toBeVisible()
         await expect(eventPopover(page).getByText(/guest/)).not.toBeVisible()
-        await page.mouse.click(200, 200)
+        await closeEventPopover(page)
 
         await openMonth(page, 'June 2026')
         await expect(visibleText(page, 'Test Reoccur #1').first()).toBeVisible({
