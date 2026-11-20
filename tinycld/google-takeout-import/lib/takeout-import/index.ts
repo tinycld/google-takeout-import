@@ -84,9 +84,7 @@ export function useTakeoutImport(context: ImportContext) {
 
     const startImportMutation = useMutation({
         mutationFn: async (services: ImportService[]) => {
-            store.setPhase('importing')
-            store.setActiveServices(services)
-            store.setProgressHref(IMPORT_PANEL_HREF)
+            store.beginImport(services, IMPORT_PANEL_HREF)
 
             await runImportImpl.runImport(selectedFiles, services, contextRef.current)
 
