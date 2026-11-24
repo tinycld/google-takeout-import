@@ -18,7 +18,7 @@ User-facing behavior:
 - **Completion** — *Import complete — N items imported · N already here · N errors* with **Import more files**, which resets the store to the file-select state. A finished run also writes one `import-finished` notice into core `notifications` (`recordImportFinished` in `lib/takeout-import/record-import-finished.ts`, payload from `import-notice.ts`) linking back to this screen; a failed notice write is logged and never turns the completed import into an error.
 - **Idempotent re-runs** — every record type is deduplicated against what already exists (see below). A re-import of the same archive, or of a later export of the same account, adds only new items. An existing record is **skipped, never updated** — except a mail thread reused from an earlier run, whose `snippet` is set when its earliest message imports.
 
-Runs on web and native identically: the import used to run in a Web Worker on web, but the worker module was never bundled (this package ships raw `.ts` with no Metro config), so construction 404'd and fell through to the main thread every time. The worker path is gone; `run-import.web.ts` and `run-import.native.ts` are kept only for Metro's platform-suffix resolution and are byte-for-byte the same logic.
+Runs on web and native identically: the import used to run in a Web Worker on web, but the worker module was never bundled (this package ships raw `.ts` with no Metro config), so construction 404'd and fell through to the main thread every time. The worker path is gone; `run-import.web.ts` and `run-import.native.ts` are kept only for Metro's platform-suffix resolution and hold the same logic.
 
 ## How it plugs in
 
@@ -112,7 +112,7 @@ The inserter writes into collections owned by four other packages plus core. It 
 
 Outside the inserter, `useTakeoutImport` writes one row into core `notifications` when a run completes (`type: 'import-finished'`, `package: 'google-takeout-import'`, `url` pointing at the import screen). This goes through pbtsdb (`notificationsCollection.insert` inside `performMutations`), not the raw handle.
 
-Every created record gets a client-side `newRecordId()`; `contacts.vcard_uid` and `calendar_events.ical_uid` fall back to `crypto.randomUUID()` when the source had none, so the row is deduplicable on a later run.
+Contacts, calendars, events, drive items and labels get a client-side `newRecordId()`; the mail rows (`mail_threads`, `mail_messages`, `mail_thread_state`) and `label_assignments` take a server-assigned id. `contacts.vcard_uid` and `calendar_events.ical_uid` fall back to `crypto.randomUUID()` when the source had none, so the row is deduplicable on a later run.
 
 ### Dedup rules
 
